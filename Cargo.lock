@@ -161,7 +161,7 @@ name = "mere"
 version = "0.1.0"
 
 [[package]]
-name = "mere_assets"
+name = "mere_asset"
 version = "0.1.0"
 dependencies = [
  "gltf",
