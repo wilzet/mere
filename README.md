@@ -1,5 +1,4 @@
-# Meshlet Rendering
-
+# MeRe: Meshlet Rendering Engine
 
 
 ## Getting started
