@@ -1,10 +1,13 @@
-use crate::{Camera, MeshHandle, MeshInstance};
+use crate::{Camera, MeshHandle, MeshInstance, asset::load_mere_asset};
 use mere_math::Transform;
 use mere_mesh::Mesh;
 use slotmap::SlotMap;
-use std::{collections::HashMap, rc::Rc};
+use std::{
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SceneObject {
     Mesh(MeshInstance),
     Camera(Camera),
@@ -33,11 +36,22 @@ impl SceneObject {
     }
 }
 
+impl TryFrom<&SceneObject> for MeshInstance {
+    type Error = &'static str;
+
+    fn try_from(value: &SceneObject) -> Result<Self, Self::Error> {
+        match value {
+            SceneObject::Mesh(mesh_instance) => Ok(mesh_instance.clone()),
+            _ => Err("object is not mesh instance"),
+        }
+    }
+}
+
 type SceneObjectHandle = slotmap::DefaultKey;
 
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
-    meshes: HashMap<MeshHandle, Rc<Mesh>>,
+    meshes: HashMap<u64, (Mesh, Weak<()>)>,
     objects: SlotMap<SceneObjectHandle, SceneObject>,
 }
 
@@ -49,17 +63,32 @@ impl Scene {
         }
     }
 
-    pub fn add_mesh(&mut self, mesh: Mesh) -> MeshHandle {
-        let handle = MeshHandle::from_mesh(&mesh);
-        if !self.meshes.contains_key(&handle) {
-            self.meshes.insert(handle, Rc::new(mesh));
+    pub fn add_mesh(&mut self, path: &str) -> anyhow::Result<MeshHandle> {
+        let id = MeshHandle::id_from_path(&path);
+        if let Some((_, weak)) = self.meshes.get(&id) {
+            if let Some(rc) = weak.upgrade() {
+                return Ok(MeshHandle {
+                    id,
+                    _ref_counter: rc,
+                });
+            }
         }
 
-        handle
+        let mere_asset = load_mere_asset(path)?;
+        let counter = Rc::new(());
+        self.meshes
+            .insert(id, (mere_asset.mesh(), Rc::downgrade(&counter)));
+        Ok(MeshHandle {
+            id,
+            _ref_counter: counter,
+        })
     }
 
     pub fn remove_mesh(&mut self, handle: MeshHandle) {
-        self.meshes.remove(&handle);
+        if handle.use_count() <= 2 {
+            // 2 because: 1 for this function argument, 1 for the Scene's internal tracking
+            self.meshes.remove(&handle.id);
+        }
     }
 
     pub fn add_object(&mut self, object: SceneObject) -> SceneObjectHandle {
@@ -80,7 +109,15 @@ impl Scene {
         })
     }
 
-    pub fn get_object(&self, handle: SceneObjectHandle) -> Option<SceneObject> {
-        self.objects.get(handle).copied()
+    pub fn get_object(&self, handle: SceneObjectHandle) -> Option<&SceneObject> {
+        self.objects.get(handle)
+    }
+
+    pub fn get_object_mut(&mut self, handle: SceneObjectHandle) -> Option<&mut SceneObject> {
+        self.objects.get_mut(handle)
+    }
+
+    pub fn get_mesh(&self, handle: &MeshHandle) -> Option<&Mesh> {
+        self.meshes.get(&handle.id).map(|(mesh, _)| mesh)
     }
 }

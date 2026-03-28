@@ -1,34 +1,28 @@
 use mere_math::Transform;
-use mere_mesh::Mesh;
-use std::ops::Deref;
+use std::rc::Rc;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct MeshHandle(u64);
-
-impl Deref for MeshHandle {
-    type Target = u64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct MeshHandle {
+    pub(crate) id: u64,
+    pub(crate) _ref_counter: Rc<()>,
 }
 
 impl MeshHandle {
-    pub(crate) fn from_mesh(mesh: &Mesh) -> Self {
+    pub(crate) fn id_from_path(path: &str) -> u64 {
         let mut hasher = blake3::Hasher::new();
-
-        for &idx in &mesh.indices {
-            hasher.update(&idx.to_le_bytes());
-        }
+        hasher.update(path.as_bytes());
 
         let mut bytes = [0u8; 8];
         bytes.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
+        u64::from_le_bytes(bytes)
+    }
 
-        Self(u64::from_le_bytes(bytes))
+    pub(crate) fn use_count(&self) -> usize {
+        Rc::strong_count(&self._ref_counter)
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MeshInstance {
     pub(crate) handle: MeshHandle,
     pub(crate) transform: Transform,
