@@ -5,6 +5,6 @@ edition = "2024"
 
 [workspace]
 resolver = "3"
-members = ["mere_asset", "mere_log", "mere_math", "mere_mesh", "mere_render"]
+members = ["mere_asset", "mere_asset/common", "mere_log", "mere_math", "mere_mesh", "mere_render"]
 
 [dependencies]

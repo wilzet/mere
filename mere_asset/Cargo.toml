@@ -6,11 +6,21 @@ edition = "2024"
 [build-dependencies]
 anyhow = "1.0.102"
 blake3 = "1.8.3"
+common = { version = "0.1.0", path = "common" }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
+mere = { version = "0.1.0", path = ".." }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt = "0.6.2"
 
 [dependencies]
+anyhow = "1.0.102"
+blake3 = "1.8.3"
+common = { version = "0.1.0", path = "common" }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
+mere = { version = "0.1.0", path = ".." }
+mere_log = { version = "0.1.0", path = "../mere_log" }
+mere_math = { version = "0.1.0", path = "../mere_math" }
+mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt = "0.6.2"
+slotmap = "1.1.1"

@@ -1,4 +1,4 @@
-use glam::{Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -37,6 +37,11 @@ impl Transform {
             scale,
             ..Self::IDENTITY
         }
+    }
+
+    #[inline]
+    pub fn inverse(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation).inverse()
     }
 }
 
