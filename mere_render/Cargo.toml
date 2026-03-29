@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bytemuck.workspace = true
+mere_asset = { version = "0.1.0", path = "../mere_asset" }
+mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
+wgpu.workspace = true

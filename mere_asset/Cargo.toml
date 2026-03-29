@@ -4,17 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [build-dependencies]
-anyhow = "1.0.102"
+anyhow.workspace = true
 blake3 = "1.8.3"
 common = { version = "0.1.0", path = "common" }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
-meshopt = "0.6.2"
+meshopt.workspace = true
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow.workspace = true
 blake3 = "1.8.3"
 common = { version = "0.1.0", path = "common" }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
@@ -22,5 +22,5 @@ mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
-meshopt = "0.6.2"
+meshopt.workspace = true
 slotmap = "1.1.1"
