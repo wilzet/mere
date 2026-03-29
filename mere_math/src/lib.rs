@@ -1,4 +1,4 @@
 mod transform;
 
-pub use glam::{Quat, Vec3, Mat4};
+pub use glam::{Mat4, Quat, Vec3};
 pub use transform::Transform;
