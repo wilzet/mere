@@ -261,6 +261,12 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 [[package]]
 name = "mere"
 version = "0.1.0"
+dependencies = [
+ "mere_asset",
+ "mere_log",
+ "mere_math",
+ "mere_render",
+]
 
 [[package]]
 name = "mere_asset"
@@ -270,13 +276,17 @@ dependencies = [
  "blake3",
  "common",
  "gltf",
- "mere",
+ "mere_common",
  "mere_log",
  "mere_math",
  "mere_mesh",
  "meshopt",
  "slotmap",
 ]
+
+[[package]]
+name = "mere_common"
+version = "0.1.0"
 
 [[package]]
 name = "mere_log"

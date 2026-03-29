@@ -32,7 +32,7 @@ mod tests {
                 return;
             }
         };
-        let mesh_from_handle = scene.get_mesh(&mesh_instance.handle).unwrap();
+        let mesh_from_handle = scene.get_mesh(mesh_instance.handle()).unwrap();
         mere_log::info!("{teapot:?}");
         mere_log::info!("{mesh_instance:?}");
         mere_log::info!(

@@ -1,4 +1,4 @@
-use crate::{Camera, MeshHandle, MeshInstance, asset::load_mere_asset};
+use crate::{Camera, MeshHandle, MeshInstance, asset::load_mere_asset, mesh::MeshHandleID};
 use mere_math::Transform;
 use mere_mesh::Mesh;
 use slotmap::SlotMap;
@@ -51,7 +51,7 @@ type SceneObjectHandle = slotmap::DefaultKey;
 
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
-    meshes: HashMap<u64, (Mesh, Weak<()>)>,
+    meshes: HashMap<MeshHandleID, (Mesh, Weak<()>)>,
     objects: SlotMap<SceneObjectHandle, SceneObject>,
 }
 
@@ -117,7 +117,13 @@ impl Scene {
         self.objects.get_mut(handle)
     }
 
-    pub fn get_mesh(&self, handle: &MeshHandle) -> Option<&Mesh> {
-        self.meshes.get(&handle.id).map(|(mesh, _)| mesh)
+    pub fn get_mesh(&self, id: MeshHandleID) -> Option<&Mesh> {
+        self.meshes.get(&id).map(|(mesh, _)| mesh)
+    }
+
+    pub fn meshes(&self) -> impl Iterator<Item = (MeshHandleID, &Mesh)> {
+        self.meshes
+            .iter()
+            .map(|(handle, (mesh, _))| (*handle, mesh))
     }
 }

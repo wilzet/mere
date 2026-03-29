@@ -1,6 +1,6 @@
 use anyhow::Context;
 use common::collect_gltf_files;
-use mere::{ASSET_DIR, PROCESSED_ASSET_DIR};
+use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh;
 use std::{
     fs,
