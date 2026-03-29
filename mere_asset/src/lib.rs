@@ -15,9 +15,16 @@ mod tests {
     fn test_scene() {
         let mut scene = Scene::new();
 
-        let handle = scene.add_model("utah_teapot").unwrap();
+        let teapot_model = match scene.add_model("utah_teapot") {
+            Ok(handle) => handle,
+            Err(err) => {
+                mere_log::error!("{err}");
+                panic!();
+            }
+        };
+
         let teapot = scene.add_object(SceneObject::model(
-            handle,
+            teapot_model,
             mere_math::Transform::from_translation(mere_math::Vec3 {
                 x: 1.0,
                 y: -10.0,
@@ -29,7 +36,7 @@ mod tests {
             Ok(model) => model,
             Err(err) => {
                 mere_log::error!("{err}");
-                return;
+                panic!();
             }
         };
         let model_from_handle = scene.get_model(model_instance.handle()).unwrap();
