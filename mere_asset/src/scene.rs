@@ -1,6 +1,6 @@
-use crate::{Camera, MeshHandle, MeshInstance, asset::load_mere_asset, mesh::MeshHandleID};
+use crate::{Camera, ModelHandle, ModelInstance, asset::load_mere_asset, model::ModelHandleID};
 use mere_math::Transform;
-use mere_mesh::Mesh;
+use mere_mesh::Model;
 use slotmap::SlotMap;
 use std::{
     collections::HashMap,
@@ -9,13 +9,13 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub enum SceneObject {
-    Mesh(MeshInstance),
+    Model(ModelInstance),
     Camera(Camera),
 }
 
 impl SceneObject {
-    pub fn mesh(handle: MeshHandle, transform: Transform) -> Self {
-        Self::Mesh(MeshInstance { handle, transform })
+    pub fn model(handle: ModelHandle, transform: Transform) -> Self {
+        Self::Model(ModelInstance { handle, transform })
     }
 
     pub fn camera(fov_y: f32, aspect: f32, far: f32, near: f32, transform: Transform) -> Self {
@@ -30,19 +30,19 @@ impl SceneObject {
 
     pub fn transform(&mut self) -> &mut Transform {
         match self {
-            SceneObject::Mesh(mesh_instance) => &mut mesh_instance.transform,
+            SceneObject::Model(model) => &mut model.transform,
             SceneObject::Camera(camera) => &mut camera.transform,
         }
     }
 }
 
-impl TryFrom<&SceneObject> for MeshInstance {
+impl TryFrom<&SceneObject> for ModelInstance {
     type Error = &'static str;
 
     fn try_from(value: &SceneObject) -> Result<Self, Self::Error> {
         match value {
-            SceneObject::Mesh(mesh_instance) => Ok(mesh_instance.clone()),
-            _ => Err("object is not mesh instance"),
+            SceneObject::Model(model) => Ok(model.clone()),
+            _ => Err("object is not model instance"),
         }
     }
 }
@@ -51,23 +51,23 @@ type SceneObjectHandle = slotmap::DefaultKey;
 
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
-    meshes: HashMap<MeshHandleID, (Mesh, Weak<()>)>,
+    models: HashMap<ModelHandleID, (Model, Weak<()>)>,
     objects: SlotMap<SceneObjectHandle, SceneObject>,
 }
 
 impl Scene {
     pub fn new() -> Self {
         Self {
-            meshes: HashMap::new(),
+            models: HashMap::new(),
             objects: SlotMap::new(),
         }
     }
 
-    pub fn add_mesh(&mut self, path: &str) -> anyhow::Result<MeshHandle> {
-        let id = MeshHandle::id_from_path(&path);
-        if let Some((_, weak)) = self.meshes.get(&id) {
+    pub fn add_model(&mut self, path: &str) -> anyhow::Result<ModelHandle> {
+        let id = ModelHandle::id_from_path(&path);
+        if let Some((_, weak)) = self.models.get(&id) {
             if let Some(rc) = weak.upgrade() {
-                return Ok(MeshHandle {
+                return Ok(ModelHandle {
                     id,
                     _ref_counter: rc,
                 });
@@ -76,18 +76,18 @@ impl Scene {
 
         let mere_asset = load_mere_asset(path)?;
         let counter = Rc::new(());
-        self.meshes
-            .insert(id, (mere_asset.mesh(), Rc::downgrade(&counter)));
-        Ok(MeshHandle {
+        self.models
+            .insert(id, (mere_asset.model(), Rc::downgrade(&counter)));
+        Ok(ModelHandle {
             id,
             _ref_counter: counter,
         })
     }
 
-    pub fn remove_mesh(&mut self, handle: MeshHandle) {
+    pub fn remove_model(&mut self, handle: ModelHandle) {
         if handle.use_count() <= 2 {
             // 2 because: 1 for this function argument, 1 for the Scene's internal tracking
-            self.meshes.remove(&handle.id);
+            self.models.remove(&handle.id);
         }
     }
 
@@ -117,13 +117,13 @@ impl Scene {
         self.objects.get_mut(handle)
     }
 
-    pub fn get_mesh(&self, id: MeshHandleID) -> Option<&Mesh> {
-        self.meshes.get(&id).map(|(mesh, _)| mesh)
+    pub fn get_model(&self, id: ModelHandleID) -> Option<&Model> {
+        self.models.get(&id).map(|(model, _)| model)
     }
 
-    pub fn meshes(&self) -> impl Iterator<Item = (MeshHandleID, &Mesh)> {
-        self.meshes
+    pub fn models(&self) -> impl Iterator<Item = (ModelHandleID, &Model)> {
+        self.models
             .iter()
-            .map(|(handle, (mesh, _))| (*handle, mesh))
+            .map(|(handle, (model, _))| (*handle, model))
     }
 }

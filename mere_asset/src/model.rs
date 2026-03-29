@@ -1,22 +1,22 @@
 use mere_math::Transform;
 use std::rc::Rc;
 
-pub(crate) type MeshHandleID = u64;
+pub(crate) type ModelHandleID = u64;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
-pub struct MeshHandle {
-    pub(crate) id: MeshHandleID,
+pub struct ModelHandle {
+    pub(crate) id: ModelHandleID,
     pub(crate) _ref_counter: Rc<()>,
 }
 
-impl MeshHandle {
-    pub(crate) fn id_from_path(path: &str) -> MeshHandleID {
+impl ModelHandle {
+    pub(crate) fn id_from_path(path: &str) -> ModelHandleID {
         let mut hasher = blake3::Hasher::new();
         hasher.update(path.as_bytes());
 
         let mut bytes = [0u8; 8];
         bytes.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-        MeshHandleID::from_le_bytes(bytes)
+        ModelHandleID::from_le_bytes(bytes)
     }
 
     pub(crate) fn use_count(&self) -> usize {
@@ -25,13 +25,13 @@ impl MeshHandle {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct MeshInstance {
-    pub(crate) handle: MeshHandle,
+pub struct ModelInstance {
+    pub(crate) handle: ModelHandle,
     pub(crate) transform: Transform,
 }
 
-impl MeshInstance {
-    pub fn handle(&self) -> MeshHandleID {
+impl ModelInstance {
+    pub fn handle(&self) -> ModelHandleID {
         self.handle.id
     }
 }

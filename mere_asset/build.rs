@@ -1,7 +1,6 @@
 use anyhow::Context;
 use common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_mesh;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -93,12 +92,13 @@ fn hash_files(paths: &[PathBuf]) -> anyhow::Result<Vec<u8>> {
     Ok(hasher.finalize().as_bytes().into())
 }
 
-pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Mesh> {
-    let mut merged_vertices = Vec::new();
-    let mut total_indices = 0;
+pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Model> {
+    let mut meshes = Vec::new();
 
     let (gltf, buffers, _) = gltf::import(path)?;
     for mesh in gltf.meshes() {
+        let mut merged_vertices = Vec::new();
+        let mut total_indices = 0;
         for primitive in mesh.primitives() {
             let reader = primitive.reader(|b| Some(&buffers[b.index()]));
 
@@ -137,12 +137,14 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Mesh> {
 
             merged_vertices.extend(vertices);
         }
-    }
 
-    let mut mesh = mere_mesh::Mesh::new(merged_vertices, total_indices);
-    mesh.optimize_mesh();
+        let mut mesh = mere_mesh::Mesh::new(merged_vertices, total_indices);
+        mesh.optimize_mesh();
+
+        meshes.push(mesh);
+    }
 
     mere_log::success!("Processed meshes in {path:?}");
 
-    Ok(mesh)
+    Ok(mere_mesh::Model::from(meshes))
 }

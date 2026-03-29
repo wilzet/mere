@@ -49,53 +49,95 @@ impl Mesh {
         let new_len = meshopt::optimize_vertex_fetch_in_place(indices, vertices);
         self.vertices.resize_with(new_len, || Vertex::default());
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Model {
+    meshes: Vec<Mesh>,
+    _materials: Option<Vec<()>>,
+}
+
+impl Model {
+    pub fn from(meshes: Vec<Mesh>) -> Self {
+        Self {
+            meshes,
+            _materials: None,
+        }
+    }
+
+    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.meshes.iter()
+    }
 
     pub fn into_mere_file(&self) -> anyhow::Result<Vec<u8>> {
         let mut bytes = Vec::new();
 
         // Write header
-        bytes.extend_from_slice(&(self.vertices.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(&(self.indices.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.meshes.len() as u64).to_le_bytes());
 
-        // Write mesh data
-        let vertex_bytes = bytemuck::cast_slice(&self.vertices);
-        bytes.extend_from_slice(vertex_bytes);
+        // Write per mesh data
+        for mesh in &self.meshes {
+            bytes.extend_from_slice(&(mesh.vertices.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(&(mesh.indices.len() as u64).to_le_bytes());
 
-        let index_bytes = bytemuck::cast_slice(&self.indices);
-        bytes.extend_from_slice(index_bytes);
+            let vertex_bytes = bytemuck::cast_slice(&mesh.vertices);
+            bytes.extend_from_slice(vertex_bytes);
+
+            let index_bytes = bytemuck::cast_slice(&mesh.indices);
+            bytes.extend_from_slice(index_bytes);
+        }
 
         Ok(bytes)
     }
 
     pub fn from_mere_file<'a>(bytes: &[u8]) -> anyhow::Result<Self> {
-        if bytes.len() < 16 {
+        if bytes.len() < 8 {
             anyhow::bail!("File too small to contain header");
         }
 
         // Read Header
-        let v_len = u64::from_le_bytes(bytes[0..8].try_into()?) as usize;
-        let i_len = u64::from_le_bytes(bytes[8..16].try_into()?) as usize;
+        let m_len = u64::from_le_bytes(bytes[0..8].try_into()?) as usize;
 
-        // Offsets
-        let v_start = 16;
-        let v_end = v_start + (v_len * std::mem::size_of::<Vertex>());
-        let i_end = v_end + (i_len * std::mem::size_of::<u32>());
+        let mut meshes = Vec::with_capacity(m_len);
+        let mut offset = 8;
 
-        if bytes.len() < i_end {
-            anyhow::bail!(
-                "File truncated: expected {} bytes, got {}",
-                i_end,
-                bytes.len()
-            );
+        // Read per mesh data
+        for _ in 0..m_len {
+            if bytes.len() < offset + 16 {
+                anyhow::bail!("File truncated while reading mesh header");
+            }
+
+            let v_len = u64::from_le_bytes(bytes[offset..offset + 8].try_into()?) as usize;
+            offset += 16;
+            let i_len = u64::from_le_bytes(bytes[offset - 8..offset].try_into()?) as usize;
+
+            // Offsets
+            let v_end = offset + v_len * std::mem::size_of::<Vertex>();
+            let i_end = v_end + i_len * std::mem::size_of::<u32>();
+
+            if bytes.len() < i_end {
+                anyhow::bail!(
+                    "File truncated: expected {} bytes, got {}",
+                    i_end,
+                    bytes.len()
+                );
+            }
+
+            // Read mesh data
+            let vertices = bytemuck::cast_slice(&bytes[offset..v_end]);
+            let indices = bytemuck::cast_slice(&bytes[v_end..i_end]);
+
+            meshes.push(Mesh {
+                vertices: vertices.to_vec(),
+                indices: indices.to_vec(),
+            });
+
+            offset = i_end;
         }
 
-        // Read mesh data
-        let vertices = bytemuck::cast_slice(&bytes[v_start..v_end]);
-        let indices = bytemuck::cast_slice(&bytes[v_end..i_end]);
-
         Ok(Self {
-            vertices: vertices.to_vec(),
-            indices: indices.to_vec(),
+            meshes,
+            _materials: None,
         })
     }
 }

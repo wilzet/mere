@@ -3,24 +3,24 @@ use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use std::{fs, io, path};
 
 pub struct MereAsset {
-    mesh: mere_mesh::Mesh,
+    model: mere_mesh::Model,
 }
 
 impl MereAsset {
-    pub fn mesh(self) -> mere_mesh::Mesh {
-        self.mesh
+    pub fn model(self) -> mere_mesh::Model {
+        self.model
     }
 }
 
 pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<MereAsset> {
-    let mesh_path = path::PathBuf::from(PROCESSED_ASSET_DIR)
+    let model_path = path::PathBuf::from(PROCESSED_ASSET_DIR)
         .join(&path)
         .with_extension("mere");
 
-    let mere_bytes = fs::read(&mesh_path)?;
-    let mesh = mere_mesh::Mesh::from_mere_file(&mere_bytes[..])?;
+    let mere_bytes = fs::read(&model_path)?;
+    let model = mere_mesh::Model::from_mere_file(&mere_bytes[..])?;
 
-    Ok(MereAsset { mesh })
+    Ok(MereAsset { model })
 }
 
 pub struct GltfAsset {
