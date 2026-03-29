@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow.workspace = true
 bytemuck.workspace = true
+env_logger = "0.11.10"
 mere_asset = { version = "0.1.0", path = "../mere_asset" }
+mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
+pollster = "0.4.0"
 wgpu.workspace = true
+winit = "0.30.13"

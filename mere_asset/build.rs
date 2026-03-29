@@ -10,20 +10,14 @@ fn main() -> anyhow::Result<()> {
     let out_dir = Path::new(PROCESSED_ASSET_DIR);
     match fs::create_dir_all(&out_dir) {
         Ok(_) => (),
-        Err(err) => {
-            mere_log::error!("{err}");
-            return Err(err.into());
-        }
+        Err(err) => mere_log::error!(return err),
     }
 
     for entry in fs::read_dir(ASSET_DIR)?.filter_map(Result::ok) {
         let path = entry.path();
         match process_asset(&path, out_dir) {
             Ok(_) => (),
-            Err(err) => {
-                mere_log::error!("{err}");
-                return Err(err.into());
-            }
+            Err(err) => mere_log::error!(return err),
         }
     }
 

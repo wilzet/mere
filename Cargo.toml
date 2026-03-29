@@ -14,7 +14,5 @@ meshopt = "0.6.2"
 wgpu = { version = "29.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "gles", "vulkan", "wgsl"] }
 
 [dependencies]
-mere_asset = { version = "0.1.0", path = "mere_asset" }
-mere_log = { version = "0.1.0", path = "mere_log" }
-mere_math = { version = "0.1.0", path = "mere_math" }
+anyhow.workspace = true
 mere_render = { version = "0.1.0", path = "mere_render" }

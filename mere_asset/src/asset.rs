@@ -2,6 +2,7 @@ use common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use std::{fs, io, path};
 
+
 pub struct MereAsset {
     model: mere_mesh::Model,
 }
@@ -14,19 +15,21 @@ impl MereAsset {
 
 pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<MereAsset> {
     let model_path = path::PathBuf::from(PROCESSED_ASSET_DIR)
-        .join(&path)
-        .with_extension("mere");
+    .join(&path)
+    .with_extension("mere");
 
-    let mere_bytes = fs::read(&model_path)?;
-    let model = mere_mesh::Model::from_mere_file(&mere_bytes[..])?;
+let mere_bytes = fs::read(&model_path)?;
+let model = mere_mesh::Model::from_mere_file(&mere_bytes[..])?;
 
-    Ok(MereAsset { model })
+Ok(MereAsset { model })
 }
 
+#[allow(unused)]
 pub struct GltfAsset {
     document: gltf::Document,
 }
 
+#[allow(unused)]
 pub(crate) fn load_gltf_asset(path: impl AsRef<path::Path>) -> anyhow::Result<GltfAsset> {
     let gltf_path = path::PathBuf::from(ASSET_DIR).join(&path);
     let gltf_paths = collect_gltf_files(&gltf_path).unwrap();
