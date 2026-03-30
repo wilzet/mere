@@ -1,3 +1,5 @@
+use crate::camera::{CameraController, CameraUniform};
+use mere_asset::Camera;
 use mere_math::{Vec2, Vec3};
 use mere_mesh::Vertex;
 use std::sync::Arc;
@@ -9,6 +11,8 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
+
+mod camera;
 
 #[rustfmt::skip]
 const VERTICES: &[Vertex] = &[
@@ -32,6 +36,12 @@ pub struct State {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     window: Arc<Window>,
+    track_cursor: bool,
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
     bg_color: wgpu::Color,
 }
 
@@ -95,12 +105,56 @@ impl State {
             view_formats: vec![],
         };
 
+        let camera_controller = CameraController::new(0.001);
+
+        let mut camera = Camera::new(
+            45.0,
+            config.width as f32 / config.height as f32,
+            0.1,
+            100.0,
+            Vec3::new(0.0, 1.0, 2.0),
+        );
+        camera.look_at(Vec3::ZERO);
+
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("camera_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera_bind_group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[Some(&camera_bind_group_layout)],
                 immediate_size: 0,
             });
 
@@ -163,6 +217,12 @@ impl State {
             index_buffer,
             num_indices: INDICES.len() as u32,
             window,
+            track_cursor: false,
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
+            camera_controller,
             bg_color: wgpu::Color {
                 r: 0.1,
                 g: 0.2,
@@ -181,10 +241,18 @@ impl State {
         }
     }
 
-    pub fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
-            _ => (),
+            _ => {
+                self.camera_controller.handle_key(code, is_pressed);
+            }
+        }
+    }
+
+    pub fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
+        if let MouseButton::Left = button {
+            self.track_cursor = is_pressed;
         }
     }
 
@@ -200,7 +268,15 @@ impl State {
         }
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        self.camera_controller.update_camera(&mut self.camera);
+        self.camera_uniform.update_view_proj(&self.camera);
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+    }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
@@ -253,6 +329,7 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
@@ -323,6 +400,11 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 state.handle_mouse_moved(position.x, position.y)
             }
+            WindowEvent::MouseInput {
+                state: key_state,
+                button,
+                ..
+            } => state.handle_mouse_input(button, key_state.is_pressed()),
             _ => (),
         }
     }

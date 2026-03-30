@@ -43,6 +43,21 @@ impl Transform {
     pub fn inverse(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation).inverse()
     }
+
+    #[inline]
+    pub fn forward(&self) -> Vec3 {
+        self.rotation * Vec3::NEG_Z
+    }
+
+    #[inline]
+    pub fn up(&self) -> Vec3 {
+        self.rotation * Vec3::Y
+    }
+
+    #[inline]
+    pub fn right(&self) -> Vec3 {
+        self.rotation * Vec3::X
+    }
 }
 
 impl Default for Transform {
