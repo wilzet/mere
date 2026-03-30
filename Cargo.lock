@@ -1121,6 +1121,7 @@ dependencies = [
  "env_logger",
  "mere_asset",
  "mere_log",
+ "mere_math",
  "mere_mesh",
  "pollster",
  "wgpu",

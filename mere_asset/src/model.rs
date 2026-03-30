@@ -22,6 +22,10 @@ impl ModelHandle {
     pub(crate) fn use_count(&self) -> usize {
         Rc::strong_count(&self._ref_counter)
     }
+
+    pub fn id(&self) -> ModelHandleID {
+        self.id
+    }
 }
 
 #[derive(Clone, Debug, Default)]

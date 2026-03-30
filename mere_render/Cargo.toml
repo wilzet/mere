@@ -9,6 +9,7 @@ bytemuck.workspace = true
 env_logger = "0.11.10"
 mere_asset = { version = "0.1.0", path = "../mere_asset" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
+mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 pollster = "0.4.0"
 wgpu.workspace = true

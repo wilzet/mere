@@ -131,6 +131,7 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Model> {
                     position,
                     normal,
                     tex_coord,
+                    color: Vec3::ONE,
                 }
             });
 

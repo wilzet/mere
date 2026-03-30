@@ -1,4 +1,7 @@
+use mere_math::{Vec2, Vec3};
+use mere_mesh::Vertex;
 use std::sync::Arc;
+use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -7,12 +10,27 @@ use winit::{
     window::Window,
 };
 
+#[rustfmt::skip]
+const VERTICES: &[Vertex] = &[
+    Vertex { position: Vec3::new(-0.0868241, 0.49240386, 0.0), normal: Vec3::ZERO, color: Vec3::X, tex_coord: Vec2::ZERO, },
+    Vertex { position: Vec3::new(-0.49513406, 0.06958647, 0.0), normal: Vec3::ZERO, color: Vec3::Y, tex_coord: Vec2::ZERO, },
+    Vertex { position: Vec3::new(-0.21918549, -0.44939706, 0.0), normal: Vec3::ZERO, color: Vec3::Z, tex_coord: Vec2::ZERO, },
+    Vertex { position: Vec3::new(0.35966998, -0.3473291, 0.0), normal: Vec3::ZERO, color: Vec3::new(0.0, 1.0, 1.0), tex_coord: Vec2::ZERO, },
+    Vertex { position: Vec3::new(0.44147372, 0.2347359, 0.0), normal: Vec3::ZERO, color: Vec3::new(1.0, 1.0, 0.0), tex_coord: Vec2::ZERO, },
+];
+
+const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+
 pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
+    render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
     window: Arc<Window>,
     bg_color: wgpu::Color,
 }
@@ -20,11 +38,7 @@ pub struct State {
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = window.inner_size();
-        mere_log::info!(
-            "Initializing WGPU ({}x{})",
-            size.width,
-            size.height
-        );
+        mere_log::info!("Initializing WGPU ({}x{})", size.width, size.height);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -81,6 +95,61 @@ impl State {
             view_formats: vec![],
         };
 
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[],
+                immediate_size: 0,
+            });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Vertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         mere_log::success!("State initialization complete.");
 
         Ok(Self {
@@ -89,6 +158,10 @@ impl State {
             queue,
             config,
             is_surface_configured: false,
+            render_pipeline,
+            vertex_buffer,
+            index_buffer,
+            num_indices: INDICES.len() as u32,
             window,
             bg_color: wgpu::Color {
                 r: 0.1,
@@ -161,23 +234,29 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
-        let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.bg_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-            multiview_mask: None,
-        });
-        drop(render_pass);
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.bg_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+        }
 
         self.queue.submit(Some(encoder.finish()));
         output.present();
@@ -227,12 +306,9 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
                 state.update();
-                match state.render() {
-                    Ok(_) => (),
-                    Err(err) => {
-                        mere_log::error!("{err}");
-                        event_loop.exit();
-                    }
+                if let Err(err) = state.render() {
+                    mere_log::error!("{err}");
+                    event_loop.exit();
                 }
             }
             WindowEvent::KeyboardInput {
