@@ -1,17 +1,20 @@
 fn main() {
-    let cwd = std::env::current_dir().unwrap();
+    println!("cargo:rerun-if-changed=build.rs");
 
-    // Logic to find the absolute path to "<project>/assets"
-    let (asset_path, mere_path) = if cwd.ends_with("project") {
-        let asset_path = cwd.join("assets");
-        let mere_path = asset_path.join("mere_processed");
-        (asset_path, mere_path)
-    } else {
-        let parent = cwd.parent().unwrap();
-        let asset_path = parent.join("assets");
-        let mere_path = asset_path.join("mere_processed");
-        (asset_path, mere_path)
-    };
+    // Use CARGO_MANIFEST_DIR to get a stable, absolute path to this crate
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").unwrap()
+    );
+
+    // Assuming structure is: 
+    // project/
+    // ├── assets/
+    // ├───── mere_processed/
+    // :
+    // ├── mere_common/ (where this build.rs lives)
+    // :
+    let asset_path = manifest_dir.parent().unwrap().join("assets");
+    let mere_path = asset_path.join("mere_processed");
 
     println!(
         "cargo:rustc-env=MERE_ASSETS_ROOT_DIR={}",

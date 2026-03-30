@@ -7,17 +7,26 @@ use std::{
 };
 
 fn main() -> anyhow::Result<()> {
+    println!("cargo:rerun-if-env-changed=BUILD_ASSETS");
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={ASSET_DIR}");
+
+    let asset_processing_enabled = std::env::var("BUILD_ASSETS").is_ok();
+    let profile = std::env::var("PROFILE").unwrap_or("debug".to_string());
+    if profile != "release" && !asset_processing_enabled {
+        mere_log::info!("Skipping assets processing (use `BUILD_ASSETS=1 cargo run` to enable)");
+        return Ok(());
+    }
+
     let out_dir = Path::new(PROCESSED_ASSET_DIR);
-    match fs::create_dir_all(&out_dir) {
-        Ok(_) => (),
-        Err(err) => mere_log::error!(return err),
+    if let Err(err) = fs::create_dir_all(&out_dir) {
+        mere_log::error!(return err);
     }
 
     for entry in fs::read_dir(ASSET_DIR)?.filter_map(Result::ok) {
         let path = entry.path();
-        match process_asset(&path, out_dir) {
-            Ok(_) => (),
-            Err(err) => mere_log::error!(return err),
+        if let Err(err) = process_asset(&path, out_dir) {
+            mere_log::error!(return err);
         }
     }
 
