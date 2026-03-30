@@ -1,15 +1,18 @@
-use bytemuck::{Pod, Zeroable};
+use mere_math::{Vec2, Vec3};
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub tex_coord: [f32; 2],
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub tex_coord: Vec2,
 }
+
+unsafe impl bytemuck::Zeroable for Vertex {}
+unsafe impl bytemuck::Pod for Vertex {}
 
 impl meshopt::DecodePosition for Vertex {
     fn decode_position(&self) -> [f32; 3] {
-        self.position
+        self.position.into()
     }
 }

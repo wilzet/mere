@@ -10,6 +10,7 @@ common = { version = "0.1.0", path = "common" }
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
+mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
 

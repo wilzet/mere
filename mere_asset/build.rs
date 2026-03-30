@@ -1,6 +1,7 @@
 use anyhow::Context;
 use common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
+use mere_math::{Vec2, Vec3};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -108,24 +109,19 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Model> {
             let indices = reader.read_indices().unwrap().into_u32();
             total_indices += indices.len();
 
-            let positions: Vec<_> = reader.read_positions().unwrap().collect();
-            let normals: Vec<_> = reader.read_normals().map(|it| it.collect()).unwrap_or(
-                [[0f32, 0f32, 0f32]]
-                    .into_iter()
-                    .cycle()
-                    .take(positions.len())
-                    .collect(),
-            );
-            let tex_coords: Vec<_> = reader
+            let positions = reader
+                .read_positions()
+                .unwrap()
+                .map(|p| Vec3::from(p))
+                .collect::<Vec<_>>();
+            let normals = reader
+                .read_normals()
+                .map(|it| it.map(|n| Vec3::from(n)).collect())
+                .unwrap_or_else(|| vec![Vec3::ZERO; positions.len()]);
+            let tex_coords = reader
                 .read_tex_coords(0)
-                .map(|it| it.into_f32().collect())
-                .unwrap_or(
-                    [[0f32, 0f32]]
-                        .into_iter()
-                        .cycle()
-                        .take(positions.len())
-                        .collect(),
-                );
+                .map(|it| it.into_f32().map(|t| Vec2::from(t)).collect())
+                .unwrap_or_else(|| vec![Vec2::ZERO; positions.len()]);
             let vertices = indices.map(|i| {
                 let index = i as usize;
                 let position = positions[index];
