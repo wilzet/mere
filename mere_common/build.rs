@@ -2,11 +2,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     // Use CARGO_MANIFEST_DIR to get a stable, absolute path to this crate
-    let manifest_dir = std::path::PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR").unwrap()
-    );
+    let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // Assuming structure is: 
+    // Assuming structure is:
     // project/
     // ├── assets/
     // ├───── mere_processed/
