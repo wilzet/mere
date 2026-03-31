@@ -1,5 +1,5 @@
 use mere_asset::Camera;
-use mere_math::Mat4;
+use mere_math::{Mat4, Vec3};
 use winit::keyboard::KeyCode;
 
 #[repr(C)]
@@ -26,6 +26,8 @@ pub(crate) struct CameraController {
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool,
 }
 
 impl CameraController {
@@ -36,6 +38,8 @@ impl CameraController {
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_up_pressed: false,
+            is_down_pressed: false,
         }
     }
 
@@ -55,6 +59,14 @@ impl CameraController {
             }
             KeyCode::KeyD | KeyCode::ArrowRight => {
                 self.is_right_pressed = is_pressed;
+                true
+            }
+            KeyCode::KeyQ | KeyCode::Space => {
+                self.is_up_pressed = is_pressed;
+                true
+            }
+            KeyCode::KeyE | KeyCode::ShiftLeft => {
+                self.is_down_pressed = is_pressed;
                 true
             }
             _ => false,
@@ -80,6 +92,13 @@ impl CameraController {
         }
         if self.is_left_pressed {
             camera.transform().translation -= right_norm * self.speed;
+        }
+
+        if self.is_up_pressed {
+            camera.transform().translation += Vec3::Y * self.speed;
+        }
+        if self.is_down_pressed {
+            camera.transform().translation -= Vec3::Y * self.speed;
         }
     }
 }

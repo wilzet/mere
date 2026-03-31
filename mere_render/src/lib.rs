@@ -1,6 +1,6 @@
 use crate::camera::{CameraController, CameraUniform};
 use mere_asset::Camera;
-use mere_math::{Vec2, Vec3};
+use mere_math::{Quat, Vec2, Vec3};
 use mere_mesh::Vertex;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -253,19 +253,53 @@ impl State {
     pub fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
         if let MouseButton::Left = button {
             self.track_cursor = is_pressed;
+            self.window.set_cursor_visible(!is_pressed);
+
+            if is_pressed {
+                let (width, height): (f64, f64) = self.window.inner_size().into();
+                let _ = self
+                    .window
+                    .set_cursor_position(winit::dpi::PhysicalPosition::new(
+                        width * 0.5,
+                        height * 0.5,
+                    ));
+            }
         }
     }
 
     pub fn handle_mouse_moved(&mut self, x: f64, y: f64) {
-        let (width, height): (u32, u32) = self.window.inner_size().into();
-        let r = (x / (width as f64)).clamp(0.0, 1.0);
-        let g = (y / (height as f64)).clamp(0.0, 1.0);
+        let (width, height): (f64, f64) = self.window.inner_size().into();
+        let r = (x / width).clamp(0.0, 1.0);
+        let g = (y / height).clamp(0.0, 1.0);
         self.bg_color = wgpu::Color {
             r,
             g,
             b: 0.3,
             a: 1.0,
+        };
+
+        if !self.track_cursor {
+            return;
         }
+
+        let center_x = width * 0.5;
+        let center_y = height * 0.5;
+
+        let dx = x - center_x;
+        let dy = y - center_y;
+        if dx.abs() < 0.1 && dy.abs() < 0.1 {
+            return;
+        }
+
+        let sensitivity = 0.002;
+
+        let yaw = Quat::from_rotation_y(-dx as f32 * sensitivity);
+        let pitch = Quat::from_rotation_x(-dy as f32 * sensitivity);
+        self.camera.transform().rotation = yaw * self.camera.transform().rotation * pitch;
+
+        let _ = self
+            .window
+            .set_cursor_position(winit::dpi::PhysicalPosition::new(center_x, center_y));
     }
 
     pub fn update(&mut self) {
