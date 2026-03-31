@@ -15,6 +15,10 @@ impl Transform {
         scale: Vec3::ONE,
     };
 
+    pub const fn new() -> Self {
+        Self::IDENTITY
+    }
+
     #[inline]
     pub const fn from_translation(translation: Vec3) -> Self {
         Self {
@@ -37,6 +41,29 @@ impl Transform {
             scale,
             ..Self::IDENTITY
         }
+    }
+
+    #[inline]
+    pub const fn with_translation(self, translation: Vec3) -> Self {
+        Self {
+            translation,
+            ..self
+        }
+    }
+
+    #[inline]
+    pub const fn with_rotation(self, rotation: Quat) -> Self {
+        Self { rotation, ..self }
+    }
+
+    #[inline]
+    pub const fn with_scale(self, scale: Vec3) -> Self {
+        Self { scale, ..self }
+    }
+
+    #[inline]
+    pub fn trs(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
 
     #[inline]
