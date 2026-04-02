@@ -155,7 +155,7 @@ impl State {
             }],
         });
 
-        let texture_bind_group_layout =
+        let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
@@ -206,14 +206,29 @@ impl State {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
-                label: Some("texture_bind_group_layout"),
+                label: Some("material_bind_group_layout"),
             });
 
         let mut scene = Scene::new();
         let obj_handle =
-            scene.add_gltf("utah_teapot", &device, &queue, &texture_bind_group_layout)?[0];
-        let teapot_transform = scene.get_object(obj_handle).copied().unwrap().transform().to_owned();
+            scene.add_gltf("utah_teapot", &device, &queue, &material_bind_group_layout)?[0];
+        let teapot_transform = scene
+            .get_object(obj_handle)
+            .copied()
+            .unwrap()
+            .transform()
+            .to_owned();
 
         const SPACE_BETWEEN: f32 = 5.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
@@ -228,7 +243,8 @@ impl State {
                     };
 
                     Instance {
-                        transform: Transform::from_translation(position).with_rotation(rotation) * teapot_transform,
+                        transform: Transform::from_translation(position).with_rotation(rotation)
+                            * teapot_transform,
                     }
                 })
             })
@@ -249,7 +265,7 @@ impl State {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&camera_bind_group_layout),
-                    Some(&texture_bind_group_layout),
+                    Some(&material_bind_group_layout),
                 ],
                 immediate_size: 0,
             });

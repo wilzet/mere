@@ -61,8 +61,10 @@ var s_normal: sampler;
 var t_roughness_metalness: texture_2d<f32>;
 @group(1) @binding(5)
 var s_roughness_metalness: sampler;
+@group(1) @binding(6)
+var<uniform> albedo: vec4<f32>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(in.normal * 0.5 + 0.5, 1.0);
+    return albedo * vec4(in.color, 1.0) * textureSample(t_diffuse, s_diffuse, in.tex_coord) * vec4(in.normal * 0.5 + 0.5, 1.0);
 }

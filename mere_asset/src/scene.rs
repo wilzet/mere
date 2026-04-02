@@ -68,7 +68,7 @@ impl Scene {
         path: &str,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        texture_bind_group_layout: &wgpu::BindGroupLayout,
+        material_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> anyhow::Result<Vec<SceneObjectHandle>> {
         let gltf_asset = load_gltf_asset(path)?;
         let mere_asset = load_mere_asset(path)?;
@@ -84,13 +84,14 @@ impl Scene {
                     .images()
                     .nth(i)
                     .and_then(|img| img.name());
-                match mere_mesh::Texture::from_bytes(device, queue, &image.pixels, label) {
-                    Ok(texture) => Some(texture),
-                    Err(err) => {
-                        mere_log::error!("{err}");
-                        None
-                    }
-                }
+                mere_mesh::Texture::from_bytes(
+                    device,
+                    queue,
+                    &image.pixels,
+                    image.width,
+                    image.height,
+                    label,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -98,83 +99,25 @@ impl Scene {
             let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
             let name = material.name().unwrap_or(&default_name);
 
-            let base_color = material.pbr_metallic_roughness().base_color_factor();
-            let diffuse_texture = material
-                .pbr_metallic_roughness()
-                .base_color_texture()
-                .map_or(None, |tex| textures[tex.texture().index()].clone())
-                .unwrap_or_else(|| {
-                    mere_mesh::Texture::create_1x1_texture(device, queue, [1; 4], None)
-                });
-            let roughness_metalness_texture = material
-                .pbr_metallic_roughness()
-                .metallic_roughness_texture()
-                .map_or(None, |tex| textures[tex.texture().index()].clone())
-                .unwrap_or_else(|| {
-                    mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None)
-                });
-            let normal_texture = material
-                .normal_texture()
-                .map_or(None, |tex| textures[tex.texture().index()].clone())
-                .unwrap_or_else(|| {
-                    mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None)
-                });
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: texture_bind_group_layout,
-                entries: &[
-                    diffuse_texture.bind_group_entry_view(0),
-                    diffuse_texture.bind_group_entry_sampler(1),
-                    normal_texture.bind_group_entry_view(2),
-                    normal_texture.bind_group_entry_sampler(3),
-                    roughness_metalness_texture.bind_group_entry_view(4),
-                    roughness_metalness_texture.bind_group_entry_sampler(5),
-                ],
-            });
-
-            Material {
-                name: name.to_string(),
-                base_color,
-                diffuse_texture,
-                normal_texture,
-                roughness_metalness_texture,
-                bind_group,
-            }
+            Material::from_gltf_material(
+                name,
+                material,
+                device,
+                queue,
+                material_bind_group_layout,
+                &textures,
+            )
         });
 
         let materials;
         if materials_iter.len() == 0 {
-            let name = format!("{path}_mat_default");
-            let base_color = [1.0; 4];
-            let diffuse_texture =
-                mere_mesh::Texture::create_1x1_texture(device, queue, [1; 4], None);
-            let roughness_metalness_texture =
-                mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None);
-            let normal_texture =
-                mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None);
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: texture_bind_group_layout,
-                entries: &[
-                    diffuse_texture.bind_group_entry_view(0),
-                    diffuse_texture.bind_group_entry_sampler(1),
-                    normal_texture.bind_group_entry_view(2),
-                    normal_texture.bind_group_entry_sampler(3),
-                    roughness_metalness_texture.bind_group_entry_view(4),
-                    roughness_metalness_texture.bind_group_entry_sampler(5),
-                ],
-            });
-
-            materials = vec![Material {
-                name,
-                base_color,
-                diffuse_texture,
-                normal_texture,
-                roughness_metalness_texture,
-                bind_group,
-            }]
+            materials = vec![Material::new(
+                &format!("{path}_mat_default"),
+                [1.0; 4],
+                device,
+                queue,
+                material_bind_group_layout,
+            )]
         } else {
             materials = materials_iter.collect();
         }

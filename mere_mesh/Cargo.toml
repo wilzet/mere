@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 bytemuck.workspace = true
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "hdr", "rayon"] }
+gltf.workspace = true
 mere_math = { version = "0.1.0", path = "../mere_math" }
 meshopt.workspace = true
 wgpu.workspace = true
