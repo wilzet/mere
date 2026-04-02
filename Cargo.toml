@@ -10,6 +10,7 @@ members = ["mere_asset", "mere_asset/common", "mere_common", "mere_log", "mere_m
 [workspace.dependencies]
 anyhow = "1.0.102"
 bytemuck = { version = "1.25.0", features = ["derive"] }
+gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 meshopt = "0.6.2"
 wgpu = { version = "29.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "gles", "vulkan", "wgsl"] }
 

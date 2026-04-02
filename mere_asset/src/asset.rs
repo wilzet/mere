@@ -1,14 +1,15 @@
-use common::collect_gltf_files;
+use common::{collect_gltf_files, read_mere_file};
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use std::{fs, io, path};
+use mere_mesh::MereMesh;
+use std::path;
 
-pub struct MereAsset {
-    model: mere_mesh::Model,
+pub(crate) struct MereAsset {
+    meshes: Vec<MereMesh>,
 }
 
 impl MereAsset {
-    pub fn model(self) -> mere_mesh::Model {
-        self.model
+    pub fn meshes(self) -> impl Iterator<Item = MereMesh> {
+        self.meshes.into_iter()
     }
 }
 
@@ -17,28 +18,32 @@ pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<Me
         .join(&path)
         .with_extension("mere");
 
-    let mere_bytes = fs::read(&model_path)?;
-    let model = mere_mesh::Model::from_mere_file(&mere_bytes[..])?;
+    let meshes = read_mere_file(&model_path)?;
 
-    Ok(MereAsset { model })
+    Ok(MereAsset { meshes })
 }
 
-#[allow(unused)]
-pub struct GltfAsset {
+pub(crate) struct GltfAsset {
     document: gltf::Document,
+    images: Vec<gltf::image::Data>,
 }
 
-#[allow(unused)]
+impl GltfAsset {
+    pub fn document(&self) -> &gltf::Document {
+        &self.document
+    }
+
+    pub fn images(&self) -> &Vec<gltf::image::Data> {
+        &self.images
+    }
+}
+
 pub(crate) fn load_gltf_asset(path: impl AsRef<path::Path>) -> anyhow::Result<GltfAsset> {
     let gltf_path = path::PathBuf::from(ASSET_DIR).join(&path);
     let gltf_paths = collect_gltf_files(&gltf_path).unwrap();
     assert!(gltf_paths.len() == 1);
     let gltf_path = &gltf_paths[0];
 
-    let file = fs::File::open(&gltf_path)?;
-    let reader = io::BufReader::new(file);
-    let json = gltf::json::deserialize::from_reader(reader)?;
-    let document = gltf::Document::from_json(json)?;
-
-    Ok(GltfAsset { document })
+    let (document, _, images) = gltf::import(gltf_path)?;
+    Ok(GltfAsset { document, images })
 }

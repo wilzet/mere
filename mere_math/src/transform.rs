@@ -1,4 +1,5 @@
 use glam::{Mat4, Quat, Vec3};
+use std::ops::Mul;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -90,5 +91,17 @@ impl Transform {
 impl Default for Transform {
     fn default() -> Self {
         Self::IDENTITY
+    }
+}
+
+impl Mul for Transform {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            translation: self.translation + (self.rotation * (self.scale * rhs.translation)),
+            rotation: self.rotation * rhs.rotation,
+            scale: self.scale * rhs.scale,
+        }
     }
 }

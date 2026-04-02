@@ -7,7 +7,7 @@ edition = "2024"
 anyhow.workspace = true
 blake3 = "1.8.3"
 common = { version = "0.1.0", path = "common" }
-gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
+gltf.workspace = true
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
@@ -18,10 +18,11 @@ meshopt.workspace = true
 anyhow.workspace = true
 blake3 = "1.8.3"
 common = { version = "0.1.0", path = "common" }
-gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
+gltf.workspace = true
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
 slotmap = "1.1.1"
+wgpu.workspace = true

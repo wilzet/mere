@@ -1,20 +1,21 @@
-use crate::{Camera, ModelHandle, ModelInstance, asset::load_mere_asset, model::ModelHandleID};
-use mere_math::Transform;
-use mere_mesh::Model;
-use slotmap::SlotMap;
-use std::{
-    collections::HashMap,
-    rc::{Rc, Weak},
+use crate::{
+    Camera, ModelInstance,
+    asset::{load_gltf_asset, load_mere_asset},
+    handle::{ResourceHandle, ResourceHandleID},
 };
+use mere_math::{Quat, Transform};
+use mere_mesh::{Material, Model};
+use slotmap::SlotMap;
+use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum SceneObject {
     Model(ModelInstance),
     Camera(Camera),
 }
 
 impl SceneObject {
-    pub fn model(handle: ModelHandle, transform: Transform) -> Self {
+    pub fn model(handle: ResourceHandle, transform: Transform) -> Self {
         Self::Model(ModelInstance { handle, transform })
     }
 
@@ -36,22 +37,11 @@ impl SceneObject {
     }
 }
 
-impl TryFrom<&SceneObject> for ModelInstance {
-    type Error = &'static str;
-
-    fn try_from(value: &SceneObject) -> Result<Self, Self::Error> {
-        match value {
-            SceneObject::Model(model) => Ok(model.clone()),
-            _ => Err("object is not model instance"),
-        }
-    }
-}
-
-type SceneObjectHandle = slotmap::DefaultKey;
+pub type SceneObjectHandle = slotmap::DefaultKey;
 
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
-    models: HashMap<ModelHandleID, (Model, Weak<()>)>,
+    models: HashMap<ResourceHandle, Model>,
     objects: SlotMap<SceneObjectHandle, SceneObject>,
 }
 
@@ -63,32 +53,189 @@ impl Scene {
         }
     }
 
-    pub fn add_model(&mut self, path: &str) -> anyhow::Result<ModelHandle> {
-        let id = ModelHandle::id_from_path(&path);
-        if let Some((_, weak)) = self.models.get(&id) {
-            if let Some(rc) = weak.upgrade() {
-                return Ok(ModelHandle {
-                    id,
-                    _ref_counter: rc,
-                });
-            }
+    pub fn add_model(&mut self, model: Model) -> anyhow::Result<ResourceHandle> {
+        let id = ResourceHandle::from_name(model.name());
+        if let Some(_) = self.models.get(&id) {
+            return Ok(id);
         }
 
-        let mere_asset = load_mere_asset(path)?;
-        let counter = Rc::new(());
-        self.models
-            .insert(id, (mere_asset.model(), Rc::downgrade(&counter)));
-        Ok(ModelHandle {
-            id,
-            _ref_counter: counter,
-        })
+        self.models.insert(id, model);
+        Ok(id)
     }
 
-    pub fn remove_model(&mut self, handle: ModelHandle) {
-        if handle.use_count() <= 2 {
-            // 2 because: 1 for this function argument, 1 for the Scene's internal tracking
-            self.models.remove(&handle.id);
+    pub fn add_gltf(
+        &mut self,
+        path: &str,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> anyhow::Result<Vec<SceneObjectHandle>> {
+        let gltf_asset = load_gltf_asset(path)?;
+        let mere_asset = load_mere_asset(path)?;
+        let mut meshes_iter = mere_asset.meshes();
+
+        let textures = gltf_asset
+            .images()
+            .iter()
+            .enumerate()
+            .map(|(i, image)| {
+                let label = gltf_asset
+                    .document()
+                    .images()
+                    .nth(i)
+                    .and_then(|img| img.name());
+                match mere_mesh::Texture::from_bytes(device, queue, &image.pixels, label) {
+                    Ok(texture) => Some(texture),
+                    Err(err) => {
+                        mere_log::error!("{err}");
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let materials_iter = gltf_asset.document().materials().map(|material| {
+            let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
+            let name = material.name().unwrap_or(&default_name);
+
+            let base_color = material.pbr_metallic_roughness().base_color_factor();
+            let diffuse_texture = material
+                .pbr_metallic_roughness()
+                .base_color_texture()
+                .map_or(None, |tex| textures[tex.texture().index()].clone())
+                .unwrap_or_else(|| {
+                    mere_mesh::Texture::create_1x1_texture(device, queue, [1; 4], None)
+                });
+            let roughness_metalness_texture = material
+                .pbr_metallic_roughness()
+                .metallic_roughness_texture()
+                .map_or(None, |tex| textures[tex.texture().index()].clone())
+                .unwrap_or_else(|| {
+                    mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None)
+                });
+            let normal_texture = material
+                .normal_texture()
+                .map_or(None, |tex| textures[tex.texture().index()].clone())
+                .unwrap_or_else(|| {
+                    mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None)
+                });
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: texture_bind_group_layout,
+                entries: &[
+                    diffuse_texture.bind_group_entry_view(0),
+                    diffuse_texture.bind_group_entry_sampler(1),
+                    normal_texture.bind_group_entry_view(2),
+                    normal_texture.bind_group_entry_sampler(3),
+                    roughness_metalness_texture.bind_group_entry_view(4),
+                    roughness_metalness_texture.bind_group_entry_sampler(5),
+                ],
+            });
+
+            Material {
+                name: name.to_string(),
+                base_color,
+                diffuse_texture,
+                normal_texture,
+                roughness_metalness_texture,
+                bind_group,
+            }
+        });
+
+        let materials;
+        if materials_iter.len() == 0 {
+            let name = format!("{path}_mat_default");
+            let base_color = [1.0; 4];
+            let diffuse_texture =
+                mere_mesh::Texture::create_1x1_texture(device, queue, [1; 4], None);
+            let roughness_metalness_texture =
+                mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None);
+            let normal_texture =
+                mere_mesh::Texture::create_1x1_texture(device, queue, [0; 4], None);
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: texture_bind_group_layout,
+                entries: &[
+                    diffuse_texture.bind_group_entry_view(0),
+                    diffuse_texture.bind_group_entry_sampler(1),
+                    normal_texture.bind_group_entry_view(2),
+                    normal_texture.bind_group_entry_sampler(3),
+                    roughness_metalness_texture.bind_group_entry_view(4),
+                    roughness_metalness_texture.bind_group_entry_sampler(5),
+                ],
+            });
+
+            materials = vec![Material {
+                name,
+                base_color,
+                diffuse_texture,
+                normal_texture,
+                roughness_metalness_texture,
+                bind_group,
+            }]
+        } else {
+            materials = materials_iter.collect();
         }
+
+        for model in gltf_asset.document().meshes() {
+            let default_name = format!("{path}_model_{}", model.index());
+            let name = model.name().unwrap_or(&default_name);
+
+            let mut used_materials = Vec::new();
+
+            let meshes = model
+                .primitives()
+                .zip(meshes_iter.by_ref())
+                .map(|(primitive, mere_mesh)| {
+                    let material_id = primitive.material().index().unwrap_or(0);
+                    if !used_materials.contains(&material_id) {
+                        used_materials.push(material_id);
+                    }
+
+                    let local_material_id = used_materials
+                        .iter()
+                        .position(|&x| x == material_id)
+                        .unwrap_or(0);
+
+                    mere_mesh::Mesh::from_mere_mesh(name, mere_mesh, device)
+                        .with_material(local_material_id)
+                })
+                .collect();
+
+            let model_materials = used_materials
+                .into_iter()
+                .map(|id| materials[id].clone())
+                .collect();
+
+            self.add_model(Model::new(name, meshes, model_materials))?;
+        }
+
+        let object_handles = gltf_asset
+            .document()
+            .nodes()
+            .filter_map(|node| {
+                if let Some(model) = node.mesh() {
+                    let default_name = format!("{path}_model_{}", model.index());
+                    let name = model.name().unwrap_or(&default_name);
+
+                    let model_handle = ResourceHandle::from_name(name);
+                    let (translation, rotation, scale) = node.transform().decomposed();
+                    let transform = Transform {
+                        translation: translation.into(),
+                        rotation: Quat::from_vec4(rotation.into()),
+                        scale: scale.into(),
+                    };
+
+                    Some(self.add_object(SceneObject::model(model_handle, transform)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(object_handles)
     }
 
     pub fn add_object(&mut self, object: SceneObject) -> SceneObjectHandle {
@@ -117,13 +264,11 @@ impl Scene {
         self.objects.get_mut(handle)
     }
 
-    pub fn get_model(&self, id: ModelHandleID) -> Option<&Model> {
-        self.models.get(&id).map(|(model, _)| model)
+    pub fn get_model(&self, id: ResourceHandleID) -> Option<&Model> {
+        self.models.get(&id.into())
     }
 
-    pub fn models(&self) -> impl Iterator<Item = (ModelHandleID, &Model)> {
-        self.models
-            .iter()
-            .map(|(handle, (model, _))| (*handle, model))
+    pub fn models(&self) -> impl Iterator<Item = (&ResourceHandle, &Model)> {
+        self.models.iter()
     }
 }

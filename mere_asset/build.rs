@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::collect_gltf_files;
+use common::{collect_gltf_files, write_mere_file};
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_math::{Vec2, Vec3};
 use std::{
@@ -48,7 +48,7 @@ fn process_asset(path: &Path, out_dir: &Path) -> anyhow::Result<()> {
         }
     };
 
-    let hash_path = out_dir.join(format!("{asset_root_name}.hash"));
+    let hash_path = out_dir.join(asset_root_name).with_extension("hash");
     let new_hash = hash_files(&files)?;
     if fs::read(&hash_path).is_ok_and(|old_hash| old_hash == new_hash) {
         mere_log::info!("Skipping {asset_root_name}");
@@ -70,14 +70,8 @@ fn process_asset(path: &Path, out_dir: &Path) -> anyhow::Result<()> {
 
         mere_log::info!("Processing {asset_root_name} -> {asset_name}");
 
-        let processed = process_meshes(&file)?;
-        let bin = processed.into_mere_file()?;
-
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(&output_path, bin)?;
+        let processed_meshes = process_meshes(&file)?;
+        write_mere_file(&output_path, processed_meshes)?;
     }
 
     fs::write(&hash_path, new_hash)?;
@@ -96,18 +90,16 @@ fn hash_files(paths: &[PathBuf]) -> anyhow::Result<Vec<u8>> {
     Ok(hasher.finalize().as_bytes().into())
 }
 
-pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Model> {
+pub fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
     let mut meshes = Vec::new();
 
     let (gltf, buffers, _) = gltf::import(path)?;
-    for mesh in gltf.meshes() {
-        let mut merged_vertices = Vec::new();
-        let mut total_indices = 0;
-        for primitive in mesh.primitives() {
+    for model in gltf.meshes() {
+        for primitive in model.primitives() {
             let reader = primitive.reader(|b| Some(&buffers[b.index()]));
 
             let indices = reader.read_indices().unwrap().into_u32();
-            total_indices += indices.len();
+            let index_count = indices.len();
 
             let positions = reader
                 .read_positions()
@@ -135,16 +127,13 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<mere_mesh::Model> {
                 }
             });
 
-            merged_vertices.extend(vertices);
+            let mut mesh = mere_mesh::MereMesh::new(vertices, index_count);
+            mesh.optimize_mesh();
+            meshes.push(mesh);
         }
-
-        let mut mesh = mere_mesh::Mesh::new(merged_vertices, total_indices);
-        mesh.optimize_mesh();
-
-        meshes.push(mesh);
     }
 
     mere_log::success!("Processed meshes in {path:?}");
 
-    Ok(mere_mesh::Model::from(meshes))
+    Ok(meshes)
 }
