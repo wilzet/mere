@@ -1,12 +1,14 @@
 use crate::{
     Camera, ModelInstance,
-    asset::{load_gltf_asset, load_mere_asset},
+    asset::{load_gltf_asset, load_image, load_mere_asset},
     handle::{ResourceHandle, ResourceHandleID},
 };
+use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
 use mere_mesh::{Material, Model};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use slotmap::SlotMap;
-use std::collections::HashMap;
+use std::{collections::HashMap, path};
 
 #[derive(Clone, Copy, Debug)]
 pub enum SceneObject {
@@ -63,7 +65,7 @@ impl Scene {
         Ok(id)
     }
 
-    pub fn add_gltf(
+    pub async fn add_gltf(
         &mut self,
         path: &str,
         device: &wgpu::Device,
@@ -76,22 +78,29 @@ impl Scene {
 
         let textures = gltf_asset
             .images()
-            .iter()
-            .enumerate()
-            .map(|(i, image)| {
-                let label = gltf_asset
-                    .document()
-                    .images()
-                    .nth(i)
-                    .and_then(|img| img.name());
-                mere_mesh::Texture::from_bytes(
-                    device,
-                    queue,
-                    &image.pixels,
-                    image.width,
-                    image.height,
-                    label,
-                )
+            .par_iter()
+            .map(|image| {
+                let label = match image.source() {
+                    gltf::image::Source::View { .. } => {
+                        mere_log::error!("Image is buffer view");
+                        return None;
+                    }
+                    gltf::image::Source::Uri { uri, .. } => uri,
+                };
+
+                mere_log::info!("Processing {label:?}");
+
+                let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
+                if let Ok(image) = load_image(&image_path) {
+                    Some(mere_mesh::Texture::from_image(
+                        device,
+                        queue,
+                        image,
+                        Some(label),
+                    ))
+                } else {
+                    None
+                }
             })
             .collect::<Vec<_>>();
 
@@ -177,6 +186,8 @@ impl Scene {
                 }
             })
             .collect();
+
+        mere_log::info!("Loaded {path}");
 
         Ok(object_handles)
     }

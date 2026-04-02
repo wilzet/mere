@@ -1,3 +1,5 @@
+use image::GenericImageView;
+
 #[derive(Clone, Debug)]
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -53,14 +55,14 @@ impl Texture {
         }
     }
 
-    pub fn from_bytes(
+    pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bytes: &[u8],
-        width: u32,
-        height: u32,
+        image: image::DynamicImage,
         label: Option<&str>,
     ) -> Self {
+        let (width, height) = image.dimensions();
+
         let size = wgpu::Extent3d {
             width,
             height,
@@ -85,7 +87,7 @@ impl Texture {
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            bytes,
+            &image.to_rgba8(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),

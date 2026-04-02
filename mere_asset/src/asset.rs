@@ -23,9 +23,14 @@ pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<Me
     Ok(MereAsset { meshes })
 }
 
+pub fn load_image(uri: &path::PathBuf) -> anyhow::Result<image::DynamicImage> {
+    const SIZE: u32 = 128;
+    let image = image::open(uri)?;
+    Ok(image.resize(SIZE, SIZE, image::imageops::FilterType::Nearest))
+}
+
 pub(crate) struct GltfAsset {
     document: gltf::Document,
-    images: Vec<gltf::image::Data>,
 }
 
 impl GltfAsset {
@@ -33,8 +38,8 @@ impl GltfAsset {
         &self.document
     }
 
-    pub fn images(&self) -> &Vec<gltf::image::Data> {
-        &self.images
+    pub fn images(&self) -> Vec<gltf::image::Image<'_>> {
+        self.document.images().collect()
     }
 }
 
@@ -44,6 +49,7 @@ pub(crate) fn load_gltf_asset(path: impl AsRef<path::Path>) -> anyhow::Result<Gl
     assert!(gltf_paths.len() == 1);
     let gltf_path = &gltf_paths[0];
 
-    let (document, _, images) = gltf::import(gltf_path)?;
-    Ok(GltfAsset { document, images })
+    Ok(GltfAsset {
+        document: gltf::Gltf::open(gltf_path)?.document,
+    })
 }

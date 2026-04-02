@@ -65,7 +65,7 @@ impl Material {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        textures: &Vec<Texture>,
+        textures: &Vec<Option<Texture>>,
     ) -> Self {
         let base_color = material.pbr_metallic_roughness().base_color_factor();
         let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -79,18 +79,18 @@ impl Material {
             .base_color_texture()
             .map_or_else(
                 || Texture::create_1x1_texture(device, queue, [0xff; 4], None),
-                |tex| textures[tex.texture().index()].clone(),
+                |tex| textures[tex.texture().index()].clone().unwrap(),
             );
         let roughness_metalness_texture = material
             .pbr_metallic_roughness()
             .metallic_roughness_texture()
             .map_or_else(
                 || Texture::create_1x1_texture(device, queue, [0; 4], None),
-                |tex| textures[tex.texture().index()].clone(),
+                |tex| textures[tex.texture().index()].clone().unwrap(),
             );
         let normal_texture = material.normal_texture().map_or_else(
             || Texture::create_1x1_texture(device, queue, [0; 4], None),
-            |tex| textures[tex.texture().index()].clone(),
+            |tex| textures[tex.texture().index()].clone().unwrap(),
         );
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

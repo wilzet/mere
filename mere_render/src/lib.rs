@@ -221,8 +221,14 @@ impl State {
             });
 
         let mut scene = Scene::new();
-        let obj_handle =
-            scene.add_gltf("utah_teapot", &device, &queue, &material_bind_group_layout)?[0];
+        let obj_handle = scene
+            .add_gltf(
+                "utah_teapot",
+                &device,
+                &queue,
+                &material_bind_group_layout,
+            )
+            .await?[0];
         let teapot_transform = scene
             .get_object(obj_handle)
             .copied()
