@@ -222,12 +222,7 @@ impl State {
 
         let mut scene = Scene::new();
         let obj_handle = scene
-            .add_gltf(
-                "utah_teapot",
-                &device,
-                &queue,
-                &material_bind_group_layout,
-            )
+            .add_gltf("utah_teapot", &device, &queue, &material_bind_group_layout)
             .await?[0];
         let teapot_transform = scene
             .get_object(obj_handle)
@@ -395,16 +390,17 @@ impl State {
 
     pub fn handle_mouse_moved(&mut self, x: f64, y: f64) {
         let (width, height): (f64, f64) = self.window.inner_size().into();
-        let r = (x / width).clamp(0.0, 1.0);
-        let g = (y / height).clamp(0.0, 1.0);
-        self.bg_color = wgpu::Color {
-            r,
-            g,
-            b: 0.3,
-            a: 1.0,
-        };
 
         if !self.track_cursor {
+            let r = (x / width).clamp(0.0, 1.0);
+            let g = (y / height).clamp(0.0, 1.0);
+            self.bg_color = wgpu::Color {
+                r,
+                g,
+                b: 0.3,
+                a: 1.0,
+            };
+
             self.stored_cursor_pos = (x, y);
             return;
         }
