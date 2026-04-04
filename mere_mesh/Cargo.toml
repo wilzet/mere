@@ -1,0 +1,13 @@
+[package]
+name = "mere_mesh"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+gltf.workspace = true
+image.workspace = true
+mere_math = { version = "0.1.0", path = "../mere_math" }
+meshopt.workspace = true
+wgpu.workspace = true
