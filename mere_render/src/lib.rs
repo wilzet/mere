@@ -3,9 +3,8 @@ use crate::{
     instance::{Instance, InstanceRaw},
     model::DrawModel,
 };
-use mere_asset::{Camera, Scene, SceneObjectHandle};
+use mere_asset::{Camera, Scene, SceneObjectHandle, Texture};
 use mere_math::{Quat, Transform, Vec3};
-use mere_mesh::Texture;
 use mere_mesh::Vertex;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -220,7 +219,7 @@ impl State {
                 label: Some("material_bind_group_layout"),
             });
 
-        let mut scene = Scene::new();
+        let mut scene = Scene::new(&device, &queue);
         let obj_handle = scene
             .add_gltf("utah_teapot", &device, &queue, &material_bind_group_layout)
             .await?[0];
@@ -492,14 +491,7 @@ impl State {
                 multiview_mask: None,
             });
 
-            let teapot_obj = self
-                .scene
-                .get_object(self.teapot)
-                .map_or(None, |s| match s {
-                    mere_asset::SceneObject::Model(model_instance) => Some(model_instance),
-                    _ => None,
-                })
-                .unwrap();
+            let teapot_obj = self.scene.get_object(self.teapot).unwrap();
             let teapot_model = self.scene.get_model(teapot_obj.handle()).unwrap();
             let teapot_mesh = &teapot_model.meshes[0];
             let teapot_material = &teapot_model.materials[teapot_mesh.material];

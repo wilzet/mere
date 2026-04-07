@@ -1,4 +1,7 @@
 use image::GenericImageView;
+use std::{error::Error, fmt::Display};
+
+use crate::handle::ResourceHandle;
 
 #[derive(Clone, Debug)]
 pub struct Texture {
@@ -53,6 +56,24 @@ impl Texture {
             view,
             sampler,
         }
+    }
+
+    pub fn from_bytes(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        bytes: &[u8],
+        label: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let image = image::ImageBuffer::from_raw(width, height, bytes.to_vec())
+            .ok_or(TextureError::InvalidDimensions)?;
+        Ok(Self::from_image(
+            device,
+            queue,
+            image::DynamicImage::ImageRgba8(image),
+            label,
+        ))
     }
 
     pub fn from_image(
@@ -114,65 +135,6 @@ impl Texture {
         }
     }
 
-    pub fn create_1x1_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        color: [u8; 4],
-        label: Option<&str>,
-    ) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &color,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
-        Self {
-            texture,
-            view,
-            sampler,
-        }
-    }
-
     pub fn bind_group_entry_view(&self, binding: u32) -> wgpu::BindGroupEntry<'_> {
         wgpu::BindGroupEntry {
             binding,
@@ -187,3 +149,36 @@ impl Texture {
         }
     }
 }
+
+impl Texture {
+    pub const DEFAULT_WHITE_TEXTURE_ID: ResourceHandle<Texture> = ResourceHandle::new(0);
+    pub const DEFAULT_BLACK_TEXTURE_ID: ResourceHandle<Texture> = ResourceHandle::new(1);
+
+    pub const DEFAULT_TEXTURES: [(ResourceHandle<Texture>, &str, [u8; 4]); 2] = [
+        (
+            Self::DEFAULT_WHITE_TEXTURE_ID,
+            "mere_default_white_texture",
+            [0xff; 4],
+        ),
+        (
+            Self::DEFAULT_BLACK_TEXTURE_ID,
+            "mere_default_black_texture",
+            [0; 4],
+        ),
+    ];
+}
+
+#[derive(Debug)]
+pub enum TextureError {
+    InvalidDimensions,
+}
+
+impl Display for TextureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TextureError::InvalidDimensions => f.write_str("invalid dimensions"),
+        }
+    }
+}
+
+impl Error for TextureError {}

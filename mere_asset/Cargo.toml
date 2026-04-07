@@ -17,6 +17,7 @@ meshopt.workspace = true
 [dependencies]
 anyhow.workspace = true
 blake3 = "1.8.3"
+bytemuck.workspace = true
 common = { version = "0.1.0", path = "common" }
 futures = "0.3.32"
 gltf.workspace = true
