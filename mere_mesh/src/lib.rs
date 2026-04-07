@@ -1,12 +1,8 @@
 use std::os::raw::{c_uint, c_void};
 use wgpu::util::DeviceExt;
 
-mod material;
-mod texture;
 mod vertex;
 
-pub use material::Material;
-pub use texture::Texture;
 pub use vertex::Vertex;
 
 #[derive(Clone, Debug, Default)]
@@ -143,25 +139,5 @@ impl Mesh {
             material: material_id,
             ..self
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Model {
-    pub name: String,
-    pub meshes: Vec<Mesh>,
-    pub materials: Vec<Material>,
-}
-
-impl Model {
-    pub fn new(name: &str, meshes: Vec<Mesh>, materials: Vec<Material>) -> Self {
-        Self {
-            name: name.to_string(),
-            meshes,
-            materials,
-        }
-    }
-    pub fn name(&self) -> &str {
-        &self.name
     }
 }

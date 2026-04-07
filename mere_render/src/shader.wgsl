@@ -66,5 +66,5 @@ var<uniform> albedo: vec4<f32>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return albedo * vec4(in.color, 1.0) * textureSample(t_diffuse, s_diffuse, in.tex_coord) * vec4(in.normal * 0.5 + 0.5, 1.0);
+    return albedo * vec4(in.color, 1.0) * textureSample(t_diffuse, s_diffuse, in.tex_coord); // * vec4(in.normal * 0.5 + 0.5, 1.0);
 }
