@@ -73,32 +73,34 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera) {
+    pub fn update_camera(&self, camera: &mut Camera, delta_time: f32) {
         let forward = camera.transform().forward();
         let forward_norm = forward.normalize();
 
         let right = camera.transform().right();
         let right_norm = right.normalize();
 
+        let speed = self.speed * delta_time;
+
         if self.is_forward_pressed {
-            camera.transform().translation += forward_norm * self.speed;
+            camera.transform().translation += forward_norm * speed;
         }
         if self.is_backward_pressed {
-            camera.transform().translation -= forward_norm * self.speed;
+            camera.transform().translation -= forward_norm * speed;
         }
 
         if self.is_right_pressed {
-            camera.transform().translation += right_norm * self.speed;
+            camera.transform().translation += right_norm * speed;
         }
         if self.is_left_pressed {
-            camera.transform().translation -= right_norm * self.speed;
+            camera.transform().translation -= right_norm * speed;
         }
 
         if self.is_up_pressed {
-            camera.transform().translation += Vec3::Y * self.speed;
+            camera.transform().translation += Vec3::Y * speed;
         }
         if self.is_down_pressed {
-            camera.transform().translation -= Vec3::Y * self.speed;
+            camera.transform().translation -= Vec3::Y * speed;
         }
     }
 }

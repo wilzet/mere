@@ -1,5 +1,6 @@
+use mere_asset::Model;
 use mere_mesh::Mesh;
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 pub trait DrawModel<'a> {
     fn draw_mesh(&mut self, mesh: &'a Mesh);
@@ -19,4 +20,9 @@ where
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.draw_indexed(0..mesh.num_elements, 0, instances);
     }
+}
+
+pub struct DrawItem {
+    pub index: usize,
+    pub model: Arc<Model>,
 }

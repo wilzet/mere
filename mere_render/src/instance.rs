@@ -1,21 +1,7 @@
-use mere_math::Transform;
-
-pub(crate) struct Instance {
-    pub transform: Transform,
-}
-
-impl Instance {
-    pub fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: self.transform.trs().to_cols_array_2d(),
-        }
-    }
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 pub(crate) struct InstanceRaw {
-    model: [[f32; 4]; 4],
+    transform: [[f32; 4]; 4],
 }
 
 impl InstanceRaw {
@@ -28,5 +14,9 @@ impl InstanceRaw {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &Self::ATTRIBUTES,
         }
+    }
+
+    pub fn new(transform: [[f32; 4]; 4]) -> Self {
+        Self { transform }
     }
 }

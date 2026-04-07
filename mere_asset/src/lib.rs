@@ -1,12 +1,16 @@
 mod asset;
 mod camera;
+mod handle;
+mod material;
 mod model;
 mod scene;
-mod handle;
+mod texture;
 
 pub use camera::Camera;
-pub use model::{ModelInstance};
 pub use scene::{Scene, SceneObject, SceneObjectHandle};
+pub use texture::Texture;
+pub use material::Material;
+pub use model::Model;
 
 #[cfg(test)]
 mod tests {

@@ -1,13 +1,15 @@
 use crate::{
     camera::{CameraController, CameraUniform},
-    instance::{Instance, InstanceRaw},
-    model::DrawModel,
+    instance::InstanceRaw,
+    model::{DrawItem, DrawModel},
 };
-use mere_asset::{Camera, Scene, SceneObjectHandle};
-use mere_math::{Quat, Transform, Vec3};
-use mere_mesh::Texture;
+use mere_asset::{Camera, Material, Scene, Texture};
+use mere_math::{Quat, Vec3};
 use mere_mesh::Vertex;
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -20,13 +22,6 @@ use winit::{
 mod camera;
 mod instance;
 mod model;
-
-const NUM_INSTANCES_PER_ROW: usize = 4;
-const INSTANCE_DISPLACEMENT: Vec3 = Vec3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -45,10 +40,8 @@ pub struct State {
     stored_cursor_pos: (f64, f64),
     depth_texture: Texture,
     bg_color: wgpu::Color,
-    instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     scene: Scene,
-    teapot: SceneObjectHandle,
 }
 
 impl State {
@@ -111,7 +104,7 @@ impl State {
             view_formats: vec![],
         };
 
-        let camera_controller = CameraController::new(0.001);
+        let camera_controller = CameraController::new(5.0);
 
         let mut camera = Camera::new(
             45.0,
@@ -155,109 +148,28 @@ impl State {
             }],
         });
 
-        let material_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-                label: Some("material_bind_group_layout"),
-            });
+        let material_bind_group_layout = device.create_bind_group_layout(&Material::desc());
 
-        let mut scene = Scene::new();
-        let obj_handle = scene
-            .add_gltf("utah_teapot", &device, &queue, &material_bind_group_layout)
-            .await?[0];
-        let teapot_transform = scene
-            .get_object(obj_handle)
-            .copied()
-            .unwrap()
-            .transform()
-            .to_owned();
+        let mut scene = Scene::new(&device, &queue);
+        scene.add_gltf(
+            "sponza/main_sponza",
+            &device,
+            &queue,
+            &material_bind_group_layout,
+        )?;
 
-        const SPACE_BETWEEN: f32 = 5.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = SPACE_BETWEEN
-                        * (Vec3::new(x as f32, 0.0, z as f32) - INSTANCE_DISPLACEMENT);
-                    let rotation = if position == Vec3::ZERO {
-                        Quat::from_axis_angle(Vec3::Z, 0.0)
-                    } else {
-                        Quat::from_axis_angle(position.normalize(), 45.0f32.to_radians())
-                    };
-
-                    Instance {
-                        transform: Transform::from_translation(position).with_rotation(rotation)
-                            * teapot_transform,
-                    }
-                })
-            })
+        let instances = scene
+            .objects()
+            .map(|obj| InstanceRaw::new(obj.transform.trs().to_cols_array_2d()))
             .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
+            contents: bytemuck::cast_slice(&instances),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let depth_texture = Texture::create_depth_texture(&device, &config, Some("depth_texture"));
+        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
@@ -335,10 +247,8 @@ impl State {
                 b: 0.3,
                 a: 1.0,
             },
-            instances,
             instance_buffer,
             scene,
-            teapot: obj_handle,
         })
     }
 
@@ -349,7 +259,7 @@ impl State {
             self.surface.configure(&self.device, &self.config);
 
             self.depth_texture =
-                Texture::create_depth_texture(&self.device, &self.config, Some("depth_texture"));
+                Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
 
             self.is_surface_configured = true;
         }
@@ -425,8 +335,10 @@ impl State {
             .set_cursor_position(winit::dpi::PhysicalPosition::new(center_x, center_y));
     }
 
-    pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
+    pub fn update(&mut self, delta_time: Duration) {
+        let dt = delta_time.as_secs_f32();
+
+        self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -436,10 +348,18 @@ impl State {
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
-        self.window.request_redraw();
-
         if !self.is_surface_configured {
             return Ok(());
+        }
+
+        let mut draw_items = Vec::new();
+        for (i, object) in self.scene.objects().enumerate() {
+            if let Some(model) = self.scene.get_model(object.handle()) {
+                draw_items.push(DrawItem {
+                    index: i,
+                    model: model.clone(),
+                });
+            }
         }
 
         let output = match self.surface.get_current_texture() {
@@ -492,23 +412,22 @@ impl State {
                 multiview_mask: None,
             });
 
-            let teapot_obj = self
-                .scene
-                .get_object(self.teapot)
-                .map_or(None, |s| match s {
-                    mere_asset::SceneObject::Model(model_instance) => Some(model_instance),
-                    _ => None,
-                })
-                .unwrap();
-            let teapot_model = self.scene.get_model(teapot_obj.handle()).unwrap();
-            let teapot_mesh = &teapot_model.meshes[0];
-            let teapot_material = &teapot_model.materials[teapot_mesh.material];
-
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &teapot_material.bind_group, &[]);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.draw_mesh_instanced(teapot_mesh, 0..self.instances.len() as u32);
+
+            for &DrawItem {
+                index: i,
+                ref model,
+            } in draw_items.iter()
+            {
+                for mesh in model.meshes() {
+                    let material = &model.materials[mesh.material];
+
+                    render_pass.set_bind_group(1, &material.bind_group, &[]);
+                    render_pass.draw_mesh_instanced(mesh, i as u32..i as u32 + 1);
+                }
+            }
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -520,11 +439,15 @@ impl State {
 
 pub struct App {
     state: Option<State>,
+    last_frame_time: Instant,
 }
 
 impl App {
     pub fn new() -> Self {
-        Self { state: None }
+        Self {
+            state: None,
+            last_frame_time: Instant::now(),
+        }
     }
 }
 
@@ -558,11 +481,15 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                state.update();
+                let now = Instant::now();
+                let dt = now - self.last_frame_time;
+                self.last_frame_time = now;
+                state.update(dt);
                 if let Err(err) = state.render() {
                     mere_log::error!("{err}");
                     event_loop.exit();
                 }
+                state.window.request_redraw();
             }
             WindowEvent::KeyboardInput {
                 event:

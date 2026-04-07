@@ -1,31 +1,83 @@
-use std::ops::Deref;
+use std::{hash::Hash, marker::PhantomData, ops::Deref};
 
-pub(crate) type ResourceHandleID = u64;
+type ResourceHandleID = u64;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct ResourceHandle(ResourceHandleID);
+#[derive(Debug, Default)]
+pub struct ResourceHandle<R> {
+    id: ResourceHandleID,
+    _type: PhantomData<R>,
+}
 
-impl Deref for ResourceHandle {
+impl<R> ResourceHandle<R> {
+    pub const fn new(id: ResourceHandleID) -> Self {
+        Self {
+            id,
+            _type: PhantomData,
+        }
+    }
+}
+
+impl<R> Clone for ResourceHandle<R> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            _type: PhantomData,
+        }
+    }
+}
+
+impl<R> Copy for ResourceHandle<R> {}
+
+impl<R> PartialEq for ResourceHandle<R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<R> Eq for ResourceHandle<R> {}
+
+impl<R> Hash for ResourceHandle<R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl<R> Deref for ResourceHandle<R> {
     type Target = ResourceHandleID;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.id
     }
 }
 
-impl From<ResourceHandleID> for ResourceHandle {
-    fn from(value: ResourceHandleID) -> Self {
-        Self(value)
-    }
-}
-
-impl ResourceHandle {
-    pub(crate) fn from_name(name: &str) -> Self {
+impl<R> From<&[u8]> for ResourceHandle<R> {
+    fn from(value: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(name.as_bytes());
+        hasher.update(value);
 
         let mut bytes = [0u8; 8];
         bytes.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-        Self(ResourceHandleID::from_le_bytes(bytes))
+        Self::from_id(ResourceHandleID::from_le_bytes(bytes))
+    }
+}
+
+impl<R> From<usize> for ResourceHandle<R> {
+    fn from(value: usize) -> Self {
+        Self::from(value.to_le_bytes().as_slice())
+    }
+}
+
+impl<R> From<&str> for ResourceHandle<R> {
+    fn from(value: &str) -> Self {
+        Self::from(value.as_bytes())
+    }
+}
+
+impl<R> ResourceHandle<R> {
+    fn from_id(id: ResourceHandleID) -> Self {
+        Self {
+            id,
+            _type: PhantomData,
+        }
     }
 }

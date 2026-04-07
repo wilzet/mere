@@ -1,14 +1,27 @@
-use crate::handle::{ResourceHandle, ResourceHandleID};
-use mere_math::Transform;
+use crate::material::Material;
+use mere_mesh::Mesh;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ModelInstance {
-    pub(crate) handle: ResourceHandle,
-    pub(crate) transform: Transform,
+#[derive(Clone, Debug)]
+pub struct Model {
+    pub name: String,
+    pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
 }
 
-impl ModelInstance {
-    pub fn handle(&self) -> ResourceHandleID {
-        *self.handle
+impl Model {
+    pub fn new(name: &str, meshes: Vec<Mesh>, materials: Vec<Material>) -> Self {
+        Self {
+            name: name.to_string(),
+            meshes,
+            materials,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.meshes.iter()
     }
 }

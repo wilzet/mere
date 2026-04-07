@@ -17,8 +17,8 @@ meshopt.workspace = true
 [dependencies]
 anyhow.workspace = true
 blake3 = "1.8.3"
+bytemuck.workspace = true
 common = { version = "0.1.0", path = "common" }
-futures = "0.3.32"
 gltf.workspace = true
 image.workspace = true
 mere_common = { version = "0.1.0", path = "../mere_common" }
@@ -26,6 +26,7 @@ mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
+parking_lot = "0.12.5"
 rayon.workspace = true
 slotmap = "1.1.1"
 wgpu.workspace = true
