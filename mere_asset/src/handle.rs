@@ -3,19 +3,31 @@ use std::{any::TypeId, hash::Hash, marker::PhantomData, ops::Deref};
 type ResourceHandleID = u64;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct UntypedHandle(ResourceHandle<TypeId>);
+pub struct UntypedHandle {
+    id: ResourceHandleID,
+    type_id: TypeId,
+}
+
+impl UntypedHandle {
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+}
 
 impl Deref for UntypedHandle {
     type Target = ResourceHandleID;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.id
     }
 }
 
 impl<R: 'static> From<ResourceHandle<R>> for UntypedHandle {
     fn from(value: ResourceHandle<R>) -> Self {
-        Self(ResourceHandle::new(value.id))
+        Self {
+            id: value.id,
+            type_id: TypeId::of::<R>(),
+        }
     }
 }
 

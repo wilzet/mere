@@ -1,4 +1,8 @@
-use crate::{Material, Mesh, Model, Texture, asset_server::AssetServer, handle::ResourceHandle};
+use crate::{
+    Material, Mesh, Model, Texture,
+    asset_server::AssetServer,
+    handle::{ResourceHandle, UntypedHandle},
+};
 use common::{collect_gltf_files, read_mere_file};
 use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
@@ -10,6 +14,8 @@ pub(crate) trait Asset: Sized {
     type Source<'a>;
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self>;
+    fn dependencies(&self) -> Vec<UntypedHandle>;
+    fn finish(&mut self, _asset_server: &AssetServer) {}
 }
 
 impl Asset for Model {
@@ -35,6 +41,10 @@ impl Asset for Model {
 
         Ok(Self::new(name, meshes))
     }
+
+    fn dependencies(&self) -> Vec<UntypedHandle> {
+        vec![]
+    }
 }
 
 impl Asset for Texture {
@@ -57,6 +67,10 @@ impl Asset for Texture {
         let image = load_image(path, mip)?;
         Ok(Self::from_image(device, queue, image, label, format)?)
     }
+
+    fn dependencies(&self) -> Vec<UntypedHandle> {
+        vec![]
+    }
 }
 
 impl Asset for Material {
@@ -74,6 +88,18 @@ impl Asset for Material {
             device,
             asset_server,
         ))
+    }
+
+    fn dependencies(&self) -> Vec<UntypedHandle> {
+        vec![
+            self.diffuse.into(),
+            self.rough_metal.into(),
+            self.normal.into(),
+        ]
+    }
+
+    fn finish(&mut self, asset_server: &AssetServer) {
+        self.try_finish(&asset_server.device, asset_server);
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{
 };
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use parking_lot::RwLock;
-use std::{collections::HashMap, sync::Arc};
+use std::{any::TypeId, collections::HashMap, sync::Arc};
 
 pub(crate) type Atomic<T> = Arc<RwLock<T>>;
 type AtomicMap<K, V> = Atomic<HashMap<K, V>>;
@@ -31,28 +31,15 @@ pub enum AssetEvent {
     Ready(UntypedHandle),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct AssetServer {
+    pub device: wgpu::Device,
     models: ResourceMap<Model>,
     textures: ResourceMap<Texture>,
     materials: ResourceMap<Material>,
-    dependency_listeners:
-        AtomicMap<UntypedHandle, Vec<Box<dyn Fn(&Self, &wgpu::Device) + Send + Sync>>>,
+    dependency_listeners: AtomicMap<UntypedHandle, Vec<UntypedHandle>>,
     event_tx: Sender<AssetEvent>,
     event_rx: Receiver<AssetEvent>,
-}
-
-impl std::fmt::Debug for AssetServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AssetServer")
-            .field("models", &self.models)
-            .field("textures", &self.textures)
-            .field("materials", &self.materials)
-            .field("listeners", &"<listeners>")
-            .field("event_tx", &self.event_tx)
-            .field("event_rx", &self.event_rx)
-            .finish()
-    }
 }
 
 impl AssetServer {
@@ -87,6 +74,7 @@ impl AssetServer {
         let (tx, rx) = unbounded();
 
         let asset_server = Self {
+            device: device.clone(),
             models: Arc::new(RwLock::new(HashMap::new())),
             textures: Arc::new(RwLock::new(textures)),
             materials: Arc::new(RwLock::new(HashMap::new())),
@@ -103,23 +91,38 @@ impl AssetServer {
         asset_server
     }
 
-    pub fn subscribe<R: Asset + Send + Sync + 'static, F>(&self, handle: ResourceHandle<R>, f: F)
-    where
-        F: Fn(&Self, &wgpu::Device) + Send + Sync + 'static,
-    {
-        let untyped_handle = handle.into();
+    pub fn subscribe<R: Asset + 'static>(
+        &self,
+        dependency_handle: UntypedHandle,
+        handle: ResourceHandle<R>,
+    ) {
         let mut listeners = self.dependency_listeners.write();
         listeners
-            .entry(untyped_handle)
+            .entry(dependency_handle)
             .or_default()
-            .push(Box::new(move |assets, device| f(assets, device)));
+            .push(handle.into());
     }
 
-    pub fn dispatch_ready(&self, handle: UntypedHandle, device: &wgpu::Device) {
+    pub fn dispatch_ready(&self, handle: UntypedHandle) {
         if let Some(listeners) = self.dependency_listeners.write().remove(&handle) {
             for listener in listeners {
-                listener(self, device);
+                self.finish_untyped(listener);
             }
+        }
+    }
+
+    pub fn finish_untyped(&self, handle: UntypedHandle) {
+        let type_id = handle.type_id();
+
+        if type_id == TypeId::of::<Material>() {
+            let h = ResourceHandle::<Material>::new(*handle);
+            self.finish(h);
+        } else if type_id == TypeId::of::<Texture>() {
+            let h = ResourceHandle::<Texture>::new(*handle);
+            self.finish(h);
+        } else if type_id == TypeId::of::<Model>() {
+            let h = ResourceHandle::<Model>::new(*handle);
+            self.finish(h);
         }
     }
 
@@ -132,12 +135,7 @@ pub trait Resource<R: Asset> {
     fn get(&self, handle: ResourceHandle<R>) -> Option<Atomic<R>>;
     fn add(&mut self, value: R) -> ResourceHandle<R>;
     fn reserve_handle(&self, handle: ResourceHandle<R>);
-    fn update<F: FnOnce(&mut R)>(&self, handle: ResourceHandle<R>, f: F) {
-        if let Some(resource) = self.get(handle) {
-            let mut r = resource.write();
-            f(&mut r);
-        }
-    }
+    fn finish(&self, handle: ResourceHandle<R>);
 }
 
 pub trait DefaultResource<R: Asset>: Resource<R> {
@@ -167,6 +165,10 @@ macro_rules! resource_impl {
                     }
                 }
 
+                for dependent in value.dependencies() {
+                    self.subscribe(dependent, id);
+                }
+
                 self.$storage
                     .write()
                     .insert(id, AssetState::new(Some(value)));
@@ -181,6 +183,13 @@ macro_rules! resource_impl {
                     .write()
                     .entry(handle)
                     .or_insert(AssetState::Loading);
+            }
+
+            fn finish(&self, handle: ResourceHandle<$resource>) {
+                if let Some(resource) = self.get(handle) {
+                    let mut r = resource.write();
+                    r.finish(self);
+                }
             }
         }
     };

@@ -26,7 +26,7 @@ impl Material {
 
     pub(crate) fn default_material(device: &wgpu::Device, asset_server: &AssetServer) -> Self {
         let mut material = Self::new(Self::DEFAULT_MATERIAL_NAME, [1.0, 0.0, 1.0, 1.0], device);
-        let _ = material.finish(device, asset_server);
+        material.try_finish(device, asset_server);
         material
     }
 
@@ -69,8 +69,11 @@ impl Material {
         let map_error = |name: &str, ty: &str, default: ResourceHandle<Texture>| {
             let local_name = name.to_string();
             let local_ty = ty.to_string();
+            let asset_server_inner = asset_server.clone();
             move || {
                 mere_log::warn!("material {local_name} is missing texture {local_ty}");
+                let id = ResourceHandle::<Material>::from(local_name.as_str());
+                asset_server_inner.subscribe(id.into(), id);
                 default
             }
         };
@@ -93,13 +96,6 @@ impl Material {
             |normal| map_handle(normal.texture()),
         );
 
-        let mat_handle = ResourceHandle::from(name);
-        asset_server.subscribe(diffuse_texture_handle, move |assets, device| {
-            assets.update(mat_handle, |mat: &mut Self| {
-                let _ = mat.finish(device, assets);
-            })
-        });
-
         Self {
             name: name.to_string(),
             base_color,
@@ -111,11 +107,7 @@ impl Material {
         }
     }
 
-    pub(crate) fn finish(
-        &mut self,
-        device: &wgpu::Device,
-        asset_server: &AssetServer,
-    ) -> anyhow::Result<()> {
+    pub(crate) fn try_finish(&mut self, device: &wgpu::Device, asset_server: &AssetServer) {
         let diffuse_texture =
             asset_server.get_with_default(self.diffuse, Texture::DEFAULT_WHITE_TEXTURE_ID);
         let diffuse_texture = diffuse_texture.read();
@@ -146,8 +138,6 @@ impl Material {
         });
 
         self.bind_group = Some(bind_group);
-
-        Ok(())
     }
 
     pub(crate) fn name(&self) -> &str {

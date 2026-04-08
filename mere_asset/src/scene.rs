@@ -105,11 +105,11 @@ impl Scene {
         Ok(object_handles)
     }
 
-    pub fn process_asset_event(&mut self, device: &wgpu::Device) {
+    pub fn process_asset_event(&mut self) {
         while let Ok(event) = self.asset_server.try_recv() {
             match event {
                 AssetEvent::Ready(handle) => {
-                    self.asset_server.dispatch_ready(handle, device);
+                    self.asset_server.dispatch_ready(handle);
                 }
             }
         }

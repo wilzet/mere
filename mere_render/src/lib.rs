@@ -332,7 +332,7 @@ impl State {
     pub fn update(&mut self, delta_time: Duration) {
         let dt = delta_time.as_secs_f32();
 
-        self.scene.process_asset_event(&self.device);
+        self.scene.process_asset_event();
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
