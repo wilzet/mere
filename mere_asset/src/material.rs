@@ -1,9 +1,10 @@
 use crate::{
-    asset::{AssetServer, Resource},
+    asset::{AssetServer, DefaultResource, Resource},
     handle::ResourceHandle,
     texture::Texture,
 };
-use std::sync::Arc;
+use gltf::Texture as GltfTexture;
+use std::sync::OnceLock;
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Debug)]
@@ -11,63 +12,46 @@ pub struct Material {
     pub name: String,
     pub base_color: [f32; 4],
     pub buffer: wgpu::Buffer,
-    pub diffuse_texture: ResourceHandle<Texture>,
-    pub normal_texture: ResourceHandle<Texture>,
-    pub rough_metal_texture: ResourceHandle<Texture>,
-    pub bind_group: wgpu::BindGroup,
+    pub diffuse: ResourceHandle<Texture>,
+    pub normal: ResourceHandle<Texture>,
+    pub rough_metal: ResourceHandle<Texture>,
+    pub bind_group: Option<wgpu::BindGroup>,
 }
 
+static MATERIAL_BIND_GROUP: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+
 impl Material {
-    pub(crate) fn new(
-        name: &str,
-        color: [f32; 4],
-        device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-        asset_server: &AssetServer,
-    ) -> Self {
+    pub const DEFAULT_MATERIAL_ID: ResourceHandle<Self> = ResourceHandle::new(0);
+    pub(crate) const DEFAULT_MATERIAL_NAME: &str = "mere_default_material";
+
+    pub(crate) fn default_material(device: &wgpu::Device, asset_server: &AssetServer) -> Self {
+        let mut material = Self::new(Self::DEFAULT_MATERIAL_NAME, [1.0, 0.0, 1.0, 1.0], device);
+        let _ = material.finish(device, asset_server);
+        material
+    }
+
+    pub(crate) fn new(name: &str, color: [f32; 4], device: &wgpu::Device) -> Self {
         let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{name}_albedo")),
             contents: bytemuck::cast_slice(&color),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let diffuse_texture = asset_server.get(Texture::DEFAULT_WHITE_TEXTURE_ID).unwrap();
-        let rough_metal_texture = asset_server.get(Texture::DEFAULT_BLACK_TEXTURE_ID).unwrap();
-        let normal_texture = asset_server.get(Texture::DEFAULT_BLACK_TEXTURE_ID).unwrap();
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout,
-            entries: &[
-                diffuse_texture.bind_group_entry_view(0),
-                diffuse_texture.bind_group_entry_sampler(1),
-                normal_texture.bind_group_entry_view(2),
-                normal_texture.bind_group_entry_sampler(3),
-                rough_metal_texture.bind_group_entry_view(4),
-                rough_metal_texture.bind_group_entry_sampler(5),
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: color_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
         Self {
             name: name.to_string(),
             base_color: color,
             buffer: color_buffer,
-            diffuse_texture: Texture::DEFAULT_WHITE_TEXTURE_ID,
-            normal_texture: Texture::DEFAULT_BLACK_TEXTURE_ID,
-            rough_metal_texture: Texture::DEFAULT_BLACK_TEXTURE_ID,
-            bind_group,
+            diffuse: Texture::DEFAULT_CHEQUERED_TEXTURE_ID,
+            normal: Texture::DEFAULT_BLACK_TEXTURE_ID,
+            rough_metal: Texture::DEFAULT_BLACK_TEXTURE_ID,
+            bind_group: None,
         }
     }
 
     pub(crate) fn from_gltf_material(
         name: &str,
-        material: gltf::Material,
+        material: &gltf::Material,
         device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
         asset_server: &AssetServer,
     ) -> anyhow::Result<Self> {
         let base_color = material.pbr_metallic_roughness().base_color_factor();
@@ -77,38 +61,69 @@ impl Material {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let map_handle = |tex: GltfTexture<'_>| {
+            let handle = ResourceHandle::from(tex.name().unwrap());
+            asset_server.reserve_handle(handle);
+            handle
+        };
+        let map_error = |name: &str, ty: &str, default: ResourceHandle<Texture>| {
+            let local_name = name.to_string();
+            let local_ty = ty.to_string();
+            move || {
+                mere_log::warn!("material {local_name} is missing texture {local_ty}");
+                default
+            }
+        };
         let diffuse_texture_handle = material
             .pbr_metallic_roughness()
             .base_color_texture()
-            .map_or(Texture::DEFAULT_WHITE_TEXTURE_ID, |tex| {
-                ResourceHandle::from(tex.texture().name().unwrap())
-            });
+            .map_or_else(
+                map_error(name, "diffuse", Texture::DEFAULT_WHITE_TEXTURE_ID),
+                |info| map_handle(info.texture()),
+            );
         let rough_metal_texture_handle = material
             .pbr_metallic_roughness()
             .metallic_roughness_texture()
-            .map_or(Texture::DEFAULT_BLACK_TEXTURE_ID, |tex| {
-                ResourceHandle::from(tex.texture().name().unwrap())
-            });
-        let normal_texture_handle = material
-            .normal_texture()
-            .map_or(Texture::DEFAULT_BLACK_TEXTURE_ID, |tex| {
-                ResourceHandle::from(tex.texture().name().unwrap())
-            });
+            .map_or_else(
+                map_error(name, "rough_metal", Texture::DEFAULT_BLACK_TEXTURE_ID),
+                |info| map_handle(info.texture()),
+            );
+        let normal_texture_handle = material.normal_texture().map_or_else(
+            map_error(name, "normal", Texture::DEFAULT_BLACK_TEXTURE_ID),
+            |normal| map_handle(normal.texture()),
+        );
 
+        Ok(Self {
+            name: name.to_string(),
+            base_color,
+            buffer: color_buffer,
+            diffuse: diffuse_texture_handle,
+            normal: normal_texture_handle,
+            rough_metal: rough_metal_texture_handle,
+            bind_group: None,
+        })
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+        device: &wgpu::Device,
+        asset_server: &AssetServer,
+    ) -> anyhow::Result<()> {
         let diffuse_texture =
-            get_texture_with_error(asset_server, diffuse_texture_handle, name, "diffuse")?;
-        let rough_metal_texture = get_texture_with_error(
-            asset_server,
-            rough_metal_texture_handle,
-            name,
-            "roughness/metalness",
-        )?;
+            asset_server.get_with_default(self.diffuse, Texture::DEFAULT_WHITE_TEXTURE_ID);
+        let diffuse_texture = diffuse_texture.read();
+
+        let rough_metal_texture =
+            asset_server.get_with_default(self.rough_metal, Texture::DEFAULT_BLACK_TEXTURE_ID);
+        let rough_metal_texture = rough_metal_texture.read();
+
         let normal_texture =
-            get_texture_with_error(asset_server, normal_texture_handle, name, "normal")?;
+            asset_server.get_with_default(self.normal, Texture::DEFAULT_BLACK_TEXTURE_ID);
+        let normal_texture = normal_texture.read();
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout,
+            layout: Self::material_bind_group_layout(device),
             entries: &[
                 diffuse_texture.bind_group_entry_view(0),
                 diffuse_texture.bind_group_entry_sampler(1),
@@ -118,23 +133,25 @@ impl Material {
                 rough_metal_texture.bind_group_entry_sampler(5),
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: color_buffer.as_entire_binding(),
+                    resource: self.buffer.as_entire_binding(),
                 },
             ],
         });
 
-        Ok(Self {
-            name: name.to_string(),
-            base_color,
-            buffer: color_buffer,
-            diffuse_texture: diffuse_texture_handle,
-            normal_texture: normal_texture_handle,
-            rough_metal_texture: rough_metal_texture_handle,
-            bind_group,
-        })
+        self.bind_group = Some(bind_group);
+
+        Ok(())
     }
 
-    pub const fn desc() -> wgpu::BindGroupLayoutDescriptor<'static> {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn material_bind_group_layout(device: &wgpu::Device) -> &wgpu::BindGroupLayout {
+        MATERIAL_BIND_GROUP.get_or_init(|| device.create_bind_group_layout(&Self::desc()))
+    }
+
+    const fn desc() -> wgpu::BindGroupLayoutDescriptor<'static> {
         wgpu::BindGroupLayoutDescriptor {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -198,17 +215,5 @@ impl Material {
             ],
             label: Some("material_bind_group_layout"),
         }
-    }
-}
-
-fn get_texture_with_error(
-    asset_server: &AssetServer,
-    handle: ResourceHandle<Texture>,
-    name: &str,
-    ty: &str,
-) -> anyhow::Result<Arc<Texture>> {
-    match asset_server.get(handle) {
-        Some(tex) => Ok(tex),
-        None => anyhow::bail!("material {name} is missing texture {ty}"),
     }
 }

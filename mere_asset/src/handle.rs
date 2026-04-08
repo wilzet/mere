@@ -57,7 +57,7 @@ impl<R> From<&[u8]> for ResourceHandle<R> {
 
         let mut bytes = [0u8; 8];
         bytes.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-        Self::from_id(ResourceHandleID::from_le_bytes(bytes))
+        Self::new(ResourceHandleID::from_le_bytes(bytes))
     }
 }
 
@@ -70,14 +70,5 @@ impl<R> From<usize> for ResourceHandle<R> {
 impl<R> From<&str> for ResourceHandle<R> {
     fn from(value: &str) -> Self {
         Self::from(value.as_bytes())
-    }
-}
-
-impl<R> ResourceHandle<R> {
-    fn from_id(id: ResourceHandleID) -> Self {
-        Self {
-            id,
-            _type: PhantomData,
-        }
     }
 }

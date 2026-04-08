@@ -1,5 +1,4 @@
 use std::os::raw::{c_uint, c_void};
-use wgpu::util::DeviceExt;
 
 mod vertex;
 
@@ -100,44 +99,5 @@ impl MereMesh {
             },
             i_end,
         ))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Mesh {
-    pub name: String,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_elements: u32,
-    pub material: usize,
-}
-
-impl Mesh {
-    pub fn from_mere_mesh(name: &str, mesh: MereMesh, device: &wgpu::Device) -> Self {
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{}_vertex_buffer", name)),
-            contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{}_index_buffer", name)),
-            contents: bytemuck::cast_slice(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        Mesh {
-            name: name.to_string(),
-            vertex_buffer,
-            index_buffer,
-            num_elements: mesh.indices.len() as u32,
-            material: 0,
-        }
-    }
-
-    pub fn with_material(self, material_id: usize) -> Self {
-        Self {
-            material: material_id,
-            ..self
-        }
     }
 }

@@ -1,117 +1,164 @@
-use crate::{handle::ResourceHandle, model::Model, texture::Texture};
+use crate::{Material, handle::ResourceHandle, model::Model, texture::Texture};
 use common::{collect_gltf_files, read_mere_file};
+use crossbeam::channel::{Receiver, Sender, unbounded};
 use image::GenericImageView;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh::MereMesh;
 use parking_lot::RwLock;
 use std::{collections::HashMap, path, sync::Arc};
 
+pub(crate) type Atomic<T> = Arc<RwLock<T>>;
+type ResourceMap<R> = Atomic<HashMap<ResourceHandle<R>, AssetState<R>>>;
+
 #[derive(Clone, Debug)]
 pub enum AssetState<R> {
     Loading,
-    Ready(R),
+    Ready(Atomic<R>),
 }
 
-type ResourceMap<R> = Arc<RwLock<HashMap<ResourceHandle<R>, AssetState<Arc<R>>>>>;
+impl<R> AssetState<R> {
+    pub fn new(has_resource: Option<R>) -> Self {
+        match has_resource {
+            Some(value) => Self::Ready(RwLock::new(value).into()),
+            None => Self::Loading,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum AssetEvent {
+    ModelReady(ResourceHandle<Model>),
+    TextureReady(ResourceHandle<Texture>),
+    MaterialReady(ResourceHandle<Material>),
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct AssetServer {
     models: ResourceMap<Model>,
     textures: ResourceMap<Texture>,
+    materials: ResourceMap<Material>,
+    event_tx: Sender<AssetEvent>,
+    event_rx: Receiver<AssetEvent>,
 }
 
 impl AssetServer {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let mut textures = HashMap::new();
-
-        Texture::DEFAULT_TEXTURES
+        let textures = Texture::DEFAULT_TEXTURES
             .iter()
-            .for_each(|&(id, label, color)| {
-                let texture = match Texture::from_bytes(device, queue, 1, 1, &color, label) {
+            .filter_map(|&(id, label, color)| {
+                let texture = match Texture::from_bytes_with_options(
+                    device,
+                    queue,
+                    2,
+                    2,
+                    &color,
+                    label,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    wgpu::AddressMode::Repeat,
+                    wgpu::FilterMode::Nearest,
+                    wgpu::FilterMode::Nearest,
+                    wgpu::MipmapFilterMode::Nearest,
+                ) {
                     Ok(tex) => tex,
                     Err(err) => {
                         mere_log::error!("{err}");
-                        return;
+                        return None;
                     }
                 };
 
-                textures.insert(id, AssetState::Ready(texture.into()));
-            });
+                Some((id, AssetState::new(Some(texture))))
+            })
+            .collect();
 
-        Self {
+        let (tx, rx) = unbounded();
+
+        let asset_server = Self {
             models: Arc::new(RwLock::new(HashMap::new())),
             textures: Arc::new(RwLock::new(textures)),
-        }
+            materials: Arc::new(RwLock::new(HashMap::new())),
+            event_tx: tx,
+            event_rx: rx,
+        };
+
+        asset_server.materials.write().insert(
+            Material::DEFAULT_MATERIAL_ID,
+            AssetState::new(Some(Material::default_material(device, &asset_server))),
+        );
+
+        asset_server
+    }
+
+    pub fn try_recv(&self) -> anyhow::Result<AssetEvent> {
+        Ok(self.event_rx.try_recv()?)
     }
 }
 
 pub trait Resource<R> {
-    fn get(&self, handle: ResourceHandle<R>) -> Option<Arc<R>>;
-    fn add(&mut self, value: R) -> anyhow::Result<ResourceHandle<R>>;
+    fn get(&self, handle: ResourceHandle<R>) -> Option<Atomic<R>>;
+    fn add(&mut self, value: R) -> ResourceHandle<R>;
     fn reserve_handle(&self, handle: ResourceHandle<R>);
-}
-
-impl Resource<Model> for AssetServer {
-    fn get(&self, handle: ResourceHandle<Model>) -> Option<Arc<Model>> {
-        match self.models.read().get(&handle) {
-            Some(AssetState::Ready(model)) => Some(model.clone()),
-            _ => None,
+    fn update<F: FnOnce(&mut R)>(&self, handle: ResourceHandle<R>, f: F) {
+        if let Some(resource) = self.get(handle) {
+            let mut r = resource.write();
+            f(&mut r);
         }
     }
+}
 
-    fn add(&mut self, model: Model) -> anyhow::Result<ResourceHandle<Model>> {
-        let id = ResourceHandle::from(model.name());
-        {
-            if let Some(AssetState::Ready(_)) = self.models.read().get(&id) {
-                return Ok(id);
+pub trait DefaultResource<R>: Resource<R> {
+    fn get_with_default(&self, handle: ResourceHandle<R>, default: ResourceHandle<R>) -> Atomic<R> {
+        match self.get(handle) {
+            Some(value) => value,
+            None => self.get(default).unwrap(),
+        }
+    }
+}
+
+macro_rules! resource_impl {
+    ($resource:ty, $event:ident, $storage:ident, $ident:ident) => {
+        impl Resource<$resource> for AssetServer {
+            fn get(&self, handle: ResourceHandle<$resource>) -> Option<Atomic<$resource>> {
+                match self.$storage.read().get(&handle) {
+                    Some(AssetState::Ready(value)) => Some(value.clone()),
+                    _ => None,
+                }
+            }
+
+            fn add(&mut self, value: $resource) -> ResourceHandle<$resource> {
+                let id = ResourceHandle::from(value.$ident());
+                {
+                    if let Some(AssetState::Ready(_)) = self.$storage.read().get(&id) {
+                        return id;
+                    }
+                }
+
+                self.$storage
+                    .write()
+                    .insert(id, AssetState::new(Some(value)));
+
+                let _ = self.event_tx.send(AssetEvent::$event(id));
+
+                id
+            }
+
+            fn reserve_handle(&self, handle: ResourceHandle<$resource>) {
+                self.$storage
+                    .write()
+                    .entry(handle)
+                    .or_insert(AssetState::Loading);
             }
         }
-
-        self.models
-            .write()
-            .insert(id, AssetState::Ready(model.into()));
-        Ok(id)
-    }
-
-    fn reserve_handle(&self, handle: ResourceHandle<Model>) {
-        self.models
-            .write()
-            .entry(handle)
-            .or_insert(AssetState::Loading);
-    }
+    };
 }
 
-impl Resource<Texture> for AssetServer {
-    fn get(&self, handle: ResourceHandle<Texture>) -> Option<Arc<Texture>> {
-        match self.textures.read().get(&handle) {
-            Some(AssetState::Ready(texture)) => Some(texture.clone()),
-            _ => None,
-        }
-    }
+resource_impl!(Model, ModelReady, models, name);
+resource_impl!(Texture, TextureReady, textures, label);
+resource_impl!(Material, MaterialReady, materials, name);
 
-    fn add(&mut self, texture: Texture) -> anyhow::Result<ResourceHandle<Texture>> {
-        let id = ResourceHandle::from(texture.label());
-        {
-            if let Some(AssetState::Ready(_)) = self.textures.read().get(&id) {
-                return Ok(id);
-            }
-        }
+impl DefaultResource<Texture> for AssetServer {}
+impl DefaultResource<Material> for AssetServer {}
 
-        self.textures
-            .write()
-            .insert(id, AssetState::Ready(texture.into()));
-        Ok(id)
-    }
-
-    fn reserve_handle(&self, handle: ResourceHandle<Texture>) {
-        self.textures
-            .write()
-            .entry(handle)
-            .or_insert(AssetState::Loading);
-    }
-}
-
-const DEFAULT_IMAGE_LOAD_MIP: u32 = 5;
+const DEFAULT_IMAGE_LOAD_MIP: u32 = 3;
 
 pub(crate) struct MereAsset {
     meshes: Vec<MereMesh>,
@@ -144,7 +191,13 @@ pub(crate) fn load_texture(
     };
 
     let image = load_image(path, DEFAULT_IMAGE_LOAD_MIP)?;
-    Ok(Texture::from_image(device, queue, image, label))
+    Ok(Texture::from_image(
+        device,
+        queue,
+        image,
+        label,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    )?)
 }
 
 fn load_image(uri: &path::PathBuf, mip: u32) -> anyhow::Result<image::DynamicImage> {
@@ -167,8 +220,12 @@ impl GltfAsset {
         &self.document
     }
 
-    pub fn images(&self) -> Vec<gltf::image::Image<'_>> {
+    pub fn images(&self) -> Vec<gltf::Image<'_>> {
         self.document.images().collect()
+    }
+
+    pub fn materials(&self) -> Vec<gltf::Material> {
+        self.document.materials().collect()
     }
 }
 

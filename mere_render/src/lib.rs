@@ -148,15 +148,9 @@ impl State {
             }],
         });
 
-        let material_bind_group_layout = device.create_bind_group_layout(&Material::desc());
-
         let mut scene = Scene::new(&device, &queue);
-        scene.add_gltf(
-            "sponza/main_sponza",
-            &device,
-            &queue,
-            &material_bind_group_layout,
-        )?;
+        scene.load_gltf("sponza/main_sponza", &device, &queue)?;
+        scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
 
         let instances = scene
             .objects()
@@ -178,7 +172,7 @@ impl State {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&camera_bind_group_layout),
-                    Some(&material_bind_group_layout),
+                    Some(Material::material_bind_group_layout(&device)),
                 ],
                 immediate_size: 0,
             });
@@ -338,6 +332,7 @@ impl State {
     pub fn update(&mut self, delta_time: Duration) {
         let dt = delta_time.as_secs_f32();
 
+        self.scene.process_asset_event(&self.device);
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
@@ -352,13 +347,27 @@ impl State {
             return Ok(());
         }
 
+        let default_lock = self.scene.get_material(Material::DEFAULT_MATERIAL_ID);
+        let default_material = default_lock.read();
+        let default_bg = default_material.bind_group.as_ref().unwrap();
+
         let mut draw_items = Vec::new();
         for (i, object) in self.scene.objects().enumerate() {
             if let Some(model) = self.scene.get_model(object.handle()) {
-                draw_items.push(DrawItem {
-                    index: i,
-                    model: model.clone(),
-                });
+                for mesh in model.read().meshes() {
+                    let lock = self.scene.get_material(mesh.material);
+                    let material = lock.read();
+                    let bind_group = match &material.bind_group {
+                        Some(bg) => bg,
+                        None => default_bg,
+                    };
+
+                    draw_items.push(DrawItem {
+                        instance_index: i,
+                        mesh: mesh.clone(),
+                        material: bind_group.clone(),
+                    });
+                }
             }
         }
 
@@ -416,17 +425,14 @@ impl State {
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-            for &DrawItem {
-                index: i,
-                ref model,
-            } in draw_items.iter()
+            for DrawItem {
+                instance_index: i,
+                mesh,
+                material,
+            } in &draw_items
             {
-                for mesh in model.meshes() {
-                    let material = &model.materials[mesh.material];
-
-                    render_pass.set_bind_group(1, &material.bind_group, &[]);
-                    render_pass.draw_mesh_instanced(mesh, i as u32..i as u32 + 1);
-                }
+                render_pass.set_bind_group(1, material, &[]);
+                render_pass.draw_mesh_instanced(mesh, *i as u32..*i as u32 + 1);
             }
         }
 

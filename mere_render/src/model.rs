@@ -1,6 +1,5 @@
-use mere_asset::Model;
-use mere_mesh::Mesh;
-use std::{ops::Range, sync::Arc};
+use mere_asset::Mesh;
+use std::ops::Range;
 
 pub trait DrawModel<'a> {
     fn draw_mesh(&mut self, mesh: &'a Mesh);
@@ -23,6 +22,7 @@ where
 }
 
 pub struct DrawItem {
-    pub index: usize,
-    pub model: Arc<Model>,
+    pub instance_index: usize,
+    pub mesh: Mesh,
+    pub material: wgpu::BindGroup,
 }
