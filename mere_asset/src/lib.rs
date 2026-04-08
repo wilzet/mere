@@ -1,4 +1,5 @@
 mod asset;
+mod asset_server;
 mod camera;
 mod handle;
 mod material;

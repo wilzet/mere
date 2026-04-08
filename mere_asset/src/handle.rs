@@ -1,6 +1,23 @@
-use std::{hash::Hash, marker::PhantomData, ops::Deref};
+use std::{any::TypeId, hash::Hash, marker::PhantomData, ops::Deref};
 
 type ResourceHandleID = u64;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct UntypedHandle(ResourceHandle<TypeId>);
+
+impl Deref for UntypedHandle {
+    type Target = ResourceHandleID;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<R: 'static> From<ResourceHandle<R>> for UntypedHandle {
+    fn from(value: ResourceHandle<R>) -> Self {
+        Self(ResourceHandle::new(value.id))
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct ResourceHandle<R> {

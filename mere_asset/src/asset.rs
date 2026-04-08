@@ -1,164 +1,81 @@
-use crate::{Material, handle::ResourceHandle, model::Model, texture::Texture};
+use crate::{Material, Mesh, Model, Texture, asset_server::AssetServer, handle::ResourceHandle};
 use common::{collect_gltf_files, read_mere_file};
-use crossbeam::channel::{Receiver, Sender, unbounded};
+use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh::MereMesh;
-use parking_lot::RwLock;
-use std::{collections::HashMap, path, sync::Arc};
+use std::path;
 
-pub(crate) type Atomic<T> = Arc<RwLock<T>>;
-type ResourceMap<R> = Atomic<HashMap<ResourceHandle<R>, AssetState<R>>>;
+pub(crate) trait Asset: Sized {
+    type Source<'a>;
 
-#[derive(Clone, Debug)]
-pub enum AssetState<R> {
-    Loading,
-    Ready(Atomic<R>),
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self>;
 }
 
-impl<R> AssetState<R> {
-    pub fn new(has_resource: Option<R>) -> Self {
-        match has_resource {
-            Some(value) => Self::Ready(RwLock::new(value).into()),
-            None => Self::Loading,
-        }
-    }
-}
+impl Asset for Model {
+    type Source<'a> = (&'a str, GltfMesh<'a>, Vec<MereMesh>, &'a wgpu::Device);
 
-#[derive(Clone, Debug)]
-pub enum AssetEvent {
-    ModelReady(ResourceHandle<Model>),
-    TextureReady(ResourceHandle<Texture>),
-    MaterialReady(ResourceHandle<Material>),
-}
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, model, meshes, device) = source;
+        let default_name = format!("{path}_model_{}", model.index());
+        let name = model.name().unwrap_or(&default_name);
 
-#[derive(Clone, Debug)]
-pub(crate) struct AssetServer {
-    models: ResourceMap<Model>,
-    textures: ResourceMap<Texture>,
-    materials: ResourceMap<Material>,
-    event_tx: Sender<AssetEvent>,
-    event_rx: Receiver<AssetEvent>,
-}
-
-impl AssetServer {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let textures = Texture::DEFAULT_TEXTURES
-            .iter()
-            .filter_map(|&(id, label, color)| {
-                let texture = match Texture::from_bytes_with_options(
-                    device,
-                    queue,
-                    2,
-                    2,
-                    &color,
-                    label,
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    wgpu::AddressMode::Repeat,
-                    wgpu::FilterMode::Nearest,
-                    wgpu::FilterMode::Nearest,
-                    wgpu::MipmapFilterMode::Nearest,
-                ) {
-                    Ok(tex) => tex,
-                    Err(err) => {
-                        mere_log::error!("{err}");
-                        return None;
-                    }
+        let meshes = model
+            .primitives()
+            .zip(meshes)
+            .map(|(primitive, mere_mesh)| {
+                let material = match primitive.material().name() {
+                    Some(name) => ResourceHandle::from(name),
+                    None => Material::DEFAULT_MATERIAL_ID,
                 };
 
-                Some((id, AssetState::new(Some(texture))))
+                Mesh::from_mere_mesh(name, mere_mesh, &device).with_material(material)
             })
             .collect();
 
-        let (tx, rx) = unbounded();
+        Ok(Self::new(name, meshes))
+    }
+}
 
-        let asset_server = Self {
-            models: Arc::new(RwLock::new(HashMap::new())),
-            textures: Arc::new(RwLock::new(textures)),
-            materials: Arc::new(RwLock::new(HashMap::new())),
-            event_tx: tx,
-            event_rx: rx,
+impl Asset for Texture {
+    type Source<'a> = (
+        &'a path::Path,
+        wgpu::TextureFormat,
+        u32,
+        &'a wgpu::Device,
+        &'a wgpu::Queue,
+    );
+
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, format, mip, device, queue) = source;
+
+        let label = match path.file_name().map_or(None, |s| s.to_str()) {
+            Some(name) => name,
+            None => anyhow::bail!("No file found in path: {path:?}"),
         };
 
-        asset_server.materials.write().insert(
-            Material::DEFAULT_MATERIAL_ID,
-            AssetState::new(Some(Material::default_material(device, &asset_server))),
-        );
-
-        asset_server
-    }
-
-    pub fn try_recv(&self) -> anyhow::Result<AssetEvent> {
-        Ok(self.event_rx.try_recv()?)
+        let image = load_image(path, mip)?;
+        Ok(Self::from_image(device, queue, image, label, format)?)
     }
 }
 
-pub trait Resource<R> {
-    fn get(&self, handle: ResourceHandle<R>) -> Option<Atomic<R>>;
-    fn add(&mut self, value: R) -> ResourceHandle<R>;
-    fn reserve_handle(&self, handle: ResourceHandle<R>);
-    fn update<F: FnOnce(&mut R)>(&self, handle: ResourceHandle<R>, f: F) {
-        if let Some(resource) = self.get(handle) {
-            let mut r = resource.write();
-            f(&mut r);
-        }
+impl Asset for Material {
+    type Source<'a> = (&'a str, GltfMaterial<'a>, &'a wgpu::Device, &'a AssetServer);
+
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, material, device, asset_server) = source;
+
+        let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
+        let name = material.name().unwrap_or(&default_name);
+
+        Ok(Self::from_gltf_material(
+            name,
+            material,
+            device,
+            asset_server,
+        ))
     }
 }
-
-pub trait DefaultResource<R>: Resource<R> {
-    fn get_with_default(&self, handle: ResourceHandle<R>, default: ResourceHandle<R>) -> Atomic<R> {
-        match self.get(handle) {
-            Some(value) => value,
-            None => self.get(default).unwrap(),
-        }
-    }
-}
-
-macro_rules! resource_impl {
-    ($resource:ty, $event:ident, $storage:ident, $ident:ident) => {
-        impl Resource<$resource> for AssetServer {
-            fn get(&self, handle: ResourceHandle<$resource>) -> Option<Atomic<$resource>> {
-                match self.$storage.read().get(&handle) {
-                    Some(AssetState::Ready(value)) => Some(value.clone()),
-                    _ => None,
-                }
-            }
-
-            fn add(&mut self, value: $resource) -> ResourceHandle<$resource> {
-                let id = ResourceHandle::from(value.$ident());
-                {
-                    if let Some(AssetState::Ready(_)) = self.$storage.read().get(&id) {
-                        return id;
-                    }
-                }
-
-                self.$storage
-                    .write()
-                    .insert(id, AssetState::new(Some(value)));
-
-                let _ = self.event_tx.send(AssetEvent::$event(id));
-
-                id
-            }
-
-            fn reserve_handle(&self, handle: ResourceHandle<$resource>) {
-                self.$storage
-                    .write()
-                    .entry(handle)
-                    .or_insert(AssetState::Loading);
-            }
-        }
-    };
-}
-
-resource_impl!(Model, ModelReady, models, name);
-resource_impl!(Texture, TextureReady, textures, label);
-resource_impl!(Material, MaterialReady, materials, name);
-
-impl DefaultResource<Texture> for AssetServer {}
-impl DefaultResource<Material> for AssetServer {}
-
-const DEFAULT_IMAGE_LOAD_MIP: u32 = 3;
 
 pub(crate) struct MereAsset {
     meshes: Vec<MereMesh>,
@@ -180,27 +97,7 @@ pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<Me
     Ok(MereAsset { meshes })
 }
 
-pub(crate) fn load_texture(
-    path: &path::PathBuf,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> anyhow::Result<Texture> {
-    let label = match path.file_name().map_or(None, |s| s.to_str()) {
-        Some(name) => name,
-        None => anyhow::bail!("No file found in path: {path:?}"),
-    };
-
-    let image = load_image(path, DEFAULT_IMAGE_LOAD_MIP)?;
-    Ok(Texture::from_image(
-        device,
-        queue,
-        image,
-        label,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-    )?)
-}
-
-fn load_image(uri: &path::PathBuf, mip: u32) -> anyhow::Result<image::DynamicImage> {
+fn load_image(uri: &path::Path, mip: u32) -> anyhow::Result<image::DynamicImage> {
     let image = image::open(uri)?;
     let (width, height) = image.dimensions();
     let factor = 1 << mip;
@@ -224,7 +121,7 @@ impl GltfAsset {
         self.document.images().collect()
     }
 
-    pub fn materials(&self) -> Vec<gltf::Material> {
+    pub fn materials(&self) -> Vec<gltf::Material<'_>> {
         self.document.materials().collect()
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    asset::{AssetServer, DefaultResource, Resource},
+    asset_server::{AssetServer, DefaultResource, Resource},
     handle::ResourceHandle,
     texture::Texture,
 };
@@ -50,10 +50,10 @@ impl Material {
 
     pub(crate) fn from_gltf_material(
         name: &str,
-        material: &gltf::Material,
+        material: gltf::Material,
         device: &wgpu::Device,
         asset_server: &AssetServer,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let base_color = material.pbr_metallic_roughness().base_color_factor();
         let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{name}_albedo")),
@@ -93,7 +93,14 @@ impl Material {
             |normal| map_handle(normal.texture()),
         );
 
-        Ok(Self {
+        let mat_handle = ResourceHandle::from(name);
+        asset_server.subscribe(diffuse_texture_handle, move |assets, device| {
+            assets.update(mat_handle, |mat: &mut Self| {
+                let _ = mat.finish(device, assets);
+            })
+        });
+
+        Self {
             name: name.to_string(),
             base_color,
             buffer: color_buffer,
@@ -101,7 +108,7 @@ impl Material {
             normal: normal_texture_handle,
             rough_metal: rough_metal_texture_handle,
             bind_group: None,
-        })
+        }
     }
 
     pub(crate) fn finish(

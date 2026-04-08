@@ -1,18 +1,19 @@
 use crate::{
-    Camera,
-    asset::{
-        AssetEvent, AssetServer, Atomic, DefaultResource, GltfAsset, Resource, load_gltf_asset,
-        load_mere_asset, load_texture,
-    },
+    Camera, Texture,
+    asset::{Asset, GltfAsset, load_gltf_asset, load_mere_asset},
+    asset_server::{AssetEvent, AssetServer, Atomic, DefaultResource, Resource},
     handle::ResourceHandle,
     material::Material,
-    model::{Mesh, Model},
+    model::Model,
 };
 use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use slotmap::DenseSlotMap;
-use std::path;
+use std::{
+    any::{Any, TypeId},
+    path,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SceneObject {
@@ -107,15 +108,8 @@ impl Scene {
     pub fn process_asset_event(&mut self, device: &wgpu::Device) {
         while let Ok(event) = self.asset_server.try_recv() {
             match event {
-                AssetEvent::ModelReady(_) => (),
-                AssetEvent::TextureReady(_) => (),
-                AssetEvent::MaterialReady(handle) => {
-                    self.asset_server.update(handle, |mat| {
-                        match mat.finish(device, &self.asset_server) {
-                            Ok(_) => (),
-                            Err(err) => mere_log::error!("{err} in {}", mat.name),
-                        }
-                    });
+                AssetEvent::Ready(handle) => {
+                    self.asset_server.dispatch_ready(handle, device);
                 }
             }
         }
@@ -162,28 +156,23 @@ fn background_load_task(
     let mut meshes_iter = mere_asset.meshes();
 
     for model in gltf.document().meshes() {
-        let default_name = format!("{path}_model_{}", model.index());
-        let name = model.name().unwrap_or(&default_name);
-
-        let meshes = model
-            .primitives()
-            .zip(meshes_iter.by_ref())
-            .map(|(primitive, mere_mesh)| {
-                let material = match primitive.material().name() {
-                    Some(name) => ResourceHandle::from(name),
-                    None => Material::DEFAULT_MATERIAL_ID,
-                };
-
-                Mesh::from_mere_mesh(name, mere_mesh, &device).with_material(material)
-            })
+        let meshes = meshes_iter
+            .by_ref()
+            .take(model.primitives().len())
             .collect();
+        let model = Model::load((path, model, meshes, &device))?;
 
-        asset_server.add(Model::new(name, meshes));
+        asset_server.add(model);
     }
 
-    gltf.images().par_iter().for_each(|image| {
-        let mut asset_server_inner = asset_server.clone();
+    for material in gltf.materials() {
+        let material = Material::load((path, material, &device, &asset_server))?;
 
+        asset_server.add(material);
+    }
+
+    const DEFAULT_IMAGE_LOAD_MIP: u32 = 3;
+    gltf.images().par_iter().for_each(|image| {
         let label = match image.source() {
             gltf::image::Source::View { .. } => {
                 mere_log::error!("Unsupported image source");
@@ -193,7 +182,13 @@ fn background_load_task(
         };
 
         let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
-        let texture = match load_texture(&image_path, &device, &queue) {
+        let texture = match Texture::load((
+            &image_path,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            DEFAULT_IMAGE_LOAD_MIP,
+            &device,
+            &queue,
+        )) {
             Ok(tex) => tex,
             Err(err) => {
                 mere_log::error!("{err}");
@@ -201,25 +196,7 @@ fn background_load_task(
             }
         };
 
-        asset_server_inner.add(texture);
-    });
-
-    gltf.materials().par_iter().for_each(|material| {
-        let mut asset_server_inner = asset_server.clone();
-
-        let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
-        let name = material.name().unwrap_or(&default_name);
-
-        let material =
-            match Material::from_gltf_material(name, material, &device, &asset_server_inner) {
-                Ok(mat) => mat,
-                Err(err) => {
-                    mere_log::error!("{err}");
-                    return;
-                }
-            };
-
-        asset_server_inner.add(material);
+        asset_server.clone().add(texture);
     });
 
     mere_log::success!("Loaded {path}");
