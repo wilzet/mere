@@ -130,7 +130,7 @@ fn load_image(uri: &path::Path, mip: u32) -> anyhow::Result<image::DynamicImage>
     Ok(image.resize(
         width / factor,
         height / factor,
-        image::imageops::FilterType::Nearest,
+        image::imageops::FilterType::Triangle,
     ))
 }
 

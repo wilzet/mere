@@ -1,45 +1,56 @@
 use mere_asset::Camera;
-use mere_math::{Mat4, Vec3};
-use winit::keyboard::KeyCode;
+use mere_math::{Mat4, Quat, Vec3};
+use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 pub(crate) struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
         Self {
+            view_position: [0.0; 4],
             view_proj: Mat4::IDENTITY.to_cols_array_2d(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_position = camera.transform.translation.to_homogeneous().into();
         self.view_proj = (camera.projection_matrix() * camera.view_matrix()).to_cols_array_2d();
     }
 }
 
 pub(crate) struct CameraController {
     speed: f32,
+    sensitivity: f32,
     is_forward_pressed: bool,
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
     is_up_pressed: bool,
     is_down_pressed: bool,
+    rotate_horizontal: f32,
+    rotate_vertical: f32,
+    scroll: f32,
 }
 
 impl CameraController {
-    pub fn new(speed: f32) -> Self {
+    pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
+            sensitivity,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
             is_up_pressed: false,
             is_down_pressed: false,
+            rotate_horizontal: 0.0,
+            rotate_vertical: 0.0,
+            scroll: 0.0,
         }
     }
 
@@ -73,34 +84,52 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera, delta_time: f32) {
-        let forward = camera.transform().forward();
+    pub fn handle_mouse_move(&mut self, mouse_dx: f64, mouse_dy: f64) {
+        self.rotate_horizontal = mouse_dx as f32;
+        self.rotate_vertical = mouse_dy as f32;
+    }
+
+    pub fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
+        self.scroll = -match delta {
+            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
+        }
+    }
+
+    pub fn update_camera(&mut self, camera: &mut Camera, delta_time: f32) {
+        // Move
+        let forward = camera.transform.forward();
         let forward_norm = forward.normalize();
 
-        let right = camera.transform().right();
+        let right = camera.transform.right();
         let right_norm = right.normalize();
 
-        let speed = self.speed * delta_time;
+        #[rustfmt::skip]
+        let forward = (self.is_forward_pressed as i32 - self.is_backward_pressed as i32) as f32 * forward_norm;
+        #[rustfmt::skip]
+        let right = (self.is_right_pressed as i32 - self.is_left_pressed as i32) as f32 * right_norm;
+        let up = (self.is_up_pressed as i32 - self.is_down_pressed as i32) as f32 * Vec3::Y;
+        camera.transform.translation += (forward + right + up) * self.speed * delta_time;
 
-        if self.is_forward_pressed {
-            camera.transform().translation += forward_norm * speed;
-        }
-        if self.is_backward_pressed {
-            camera.transform().translation -= forward_norm * speed;
-        }
+        // Zoom
+        const ZOOM_WEIGHT: f32 = 0.1;
+        camera.fov_y_radians += self.scroll * self.sensitivity * ZOOM_WEIGHT;
 
-        if self.is_right_pressed {
-            camera.transform().translation += right_norm * speed;
-        }
-        if self.is_left_pressed {
-            camera.transform().translation -= right_norm * speed;
-        }
+        let min_fov = 1.0f32.to_radians();
+        let max_fov = 170.0f32.to_radians();
+        camera.fov_y_radians = camera.fov_y_radians.clamp(min_fov, max_fov);
 
-        if self.is_up_pressed {
-            camera.transform().translation += Vec3::Y * speed;
-        }
-        if self.is_down_pressed {
-            camera.transform().translation -= Vec3::Y * speed;
-        }
+        self.scroll = 0.0;
+
+        // Rotate
+        let fov_scale = camera.fov_y_radians / 45.0f32.to_radians();
+        let effective_sensitivity = self.sensitivity * fov_scale;
+
+        let yaw = Quat::from_rotation_y(-self.rotate_horizontal * effective_sensitivity);
+        let pitch = Quat::from_rotation_x(-self.rotate_vertical * effective_sensitivity);
+        camera.transform.rotation = yaw * camera.transform.rotation * pitch;
+
+        self.rotate_horizontal = 0.0;
+        self.rotate_vertical = 0.0;
     }
 }

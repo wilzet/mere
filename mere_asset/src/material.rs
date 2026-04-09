@@ -7,14 +7,25 @@ use gltf::Texture as GltfTexture;
 use std::sync::OnceLock;
 use wgpu::util::DeviceExt;
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug)]
+pub struct MaterialProperties {
+    base_color: [f32; 4],
+    normal_scale: f32,
+    roughness: f32,
+    metalness: f32,
+    _pad: [f32; 1],
+}
+
 #[derive(Clone, Debug)]
 pub struct Material {
     pub name: String,
-    pub base_color: [f32; 4],
+    pub properties: MaterialProperties,
     pub buffer: wgpu::Buffer,
     pub diffuse: ResourceHandle<Texture>,
     pub normal: ResourceHandle<Texture>,
     pub rough_metal: ResourceHandle<Texture>,
+    pub alpha_blended: bool,
     pub bind_group: Option<wgpu::BindGroup>,
 }
 
@@ -24,6 +35,8 @@ impl Material {
     pub const DEFAULT_MATERIAL_ID: ResourceHandle<Self> = ResourceHandle::new(0);
     pub(crate) const DEFAULT_MATERIAL_NAME: &str = "mere_default_material";
 
+    const DEFAULT_ROUGHNESS: f32 = 0.5;
+
     pub(crate) fn default_material(device: &wgpu::Device, asset_server: &AssetServer) -> Self {
         let mut material = Self::new(Self::DEFAULT_MATERIAL_NAME, [1.0, 0.0, 1.0, 1.0], device);
         material.try_finish(device, asset_server);
@@ -31,19 +44,30 @@ impl Material {
     }
 
     pub(crate) fn new(name: &str, color: [f32; 4], device: &wgpu::Device) -> Self {
-        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{name}_albedo")),
-            contents: bytemuck::cast_slice(&color),
+        let properties = MaterialProperties {
+            base_color: color,
+            normal_scale: 0.0,
+            roughness: Self::DEFAULT_ROUGHNESS,
+            metalness: 0.0,
+            _pad: [0.0; 1],
+        };
+
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{name}_properties")),
+            contents: bytemuck::cast_slice(&[properties]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let alpha_blended = color[3] < 1.0;
+
         Self {
             name: name.to_string(),
-            base_color: color,
-            buffer: color_buffer,
+            properties,
+            buffer,
             diffuse: Texture::DEFAULT_CHEQUERED_TEXTURE_ID,
-            normal: Texture::DEFAULT_BLACK_TEXTURE_ID,
-            rough_metal: Texture::DEFAULT_BLACK_TEXTURE_ID,
+            normal: Texture::DEFAULT_WHITE_TEXTURE_ID,
+            rough_metal: Texture::DEFAULT_WHITE_TEXTURE_ID,
+            alpha_blended,
             bind_group: None,
         }
     }
@@ -54,13 +78,6 @@ impl Material {
         device: &wgpu::Device,
         asset_server: &AssetServer,
     ) -> Self {
-        let base_color = material.pbr_metallic_roughness().base_color_factor();
-        let color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{name}_albedo")),
-            contents: bytemuck::cast_slice(&base_color),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
         let map_handle = |tex: GltfTexture<'_>| {
             let handle = ResourceHandle::from(tex.name().unwrap());
             asset_server.reserve_handle(handle);
@@ -77,6 +94,7 @@ impl Material {
                 default
             }
         };
+
         let diffuse_texture_handle = material
             .pbr_metallic_roughness()
             .base_color_texture()
@@ -84,25 +102,56 @@ impl Material {
                 map_error(name, "diffuse", Texture::DEFAULT_WHITE_TEXTURE_ID),
                 |info| map_handle(info.texture()),
             );
-        let rough_metal_texture_handle = material
+        let (roughness, metalness, rough_metal_texture_handle) = material
             .pbr_metallic_roughness()
             .metallic_roughness_texture()
             .map_or_else(
-                map_error(name, "rough_metal", Texture::DEFAULT_BLACK_TEXTURE_ID),
-                |info| map_handle(info.texture()),
+                || {
+                    (
+                        Self::DEFAULT_ROUGHNESS,
+                        0.0,
+                        map_error(name, "rough_metal", Texture::DEFAULT_WHITE_TEXTURE_ID)(),
+                    )
+                },
+                |info| (1.0, 1.0, map_handle(info.texture())),
             );
-        let normal_texture_handle = material.normal_texture().map_or_else(
-            map_error(name, "normal", Texture::DEFAULT_BLACK_TEXTURE_ID),
-            |normal| map_handle(normal.texture()),
+        let (normal_scale, normal_texture_handle) = material.normal_texture().map_or_else(
+            || {
+                (
+                    0.0,
+                    map_error(name, "normal", Texture::DEFAULT_WHITE_TEXTURE_ID)(),
+                )
+            },
+            |normal| (normal.scale(), map_handle(normal.texture())),
         );
+
+        let base_color = material.pbr_metallic_roughness().base_color_factor();
+
+        let properties = MaterialProperties {
+            base_color,
+            normal_scale,
+            roughness,
+            metalness,
+            _pad: [0.0; 1],
+        };
+
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{name}_properties")),
+            contents: bytemuck::cast_slice(&[properties]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let alpha_blended =
+            base_color[3] < 1.0 || material.alpha_mode() == gltf::material::AlphaMode::Blend;
 
         Self {
             name: name.to_string(),
-            base_color,
-            buffer: color_buffer,
+            properties,
+            buffer,
             diffuse: diffuse_texture_handle,
             normal: normal_texture_handle,
             rough_metal: rough_metal_texture_handle,
+            alpha_blended,
             bind_group: None,
         }
     }
@@ -113,11 +162,11 @@ impl Material {
         let diffuse_texture = diffuse_texture.read();
 
         let rough_metal_texture =
-            asset_server.get_with_default(self.rough_metal, Texture::DEFAULT_BLACK_TEXTURE_ID);
+            asset_server.get_with_default(self.rough_metal, Texture::DEFAULT_WHITE_TEXTURE_ID);
         let rough_metal_texture = rough_metal_texture.read();
 
         let normal_texture =
-            asset_server.get_with_default(self.normal, Texture::DEFAULT_BLACK_TEXTURE_ID);
+            asset_server.get_with_default(self.normal, Texture::DEFAULT_WHITE_TEXTURE_ID);
         let normal_texture = normal_texture.read();
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

@@ -1,4 +1,4 @@
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use std::ops::Mul;
 
 #[repr(C)]
@@ -70,6 +70,11 @@ impl Transform {
     #[inline]
     pub fn inverse(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation).inverse()
+    }
+
+    #[inline]
+    pub fn rotation_matrix(&self) -> Mat3 {
+        Mat3::from_quat(self.rotation)
     }
 
     #[inline]

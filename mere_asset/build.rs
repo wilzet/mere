@@ -1,7 +1,7 @@
 use anyhow::Context;
 use common::{collect_gltf_files, write_mere_file};
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_math::{Vec2, Vec3};
+use mere_math::{Vec2, Vec3, Vec4};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -114,16 +114,20 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>
                 .read_tex_coords(0)
                 .map(|it| it.into_f32().map(|t| Vec2::from(t)).collect())
                 .unwrap_or_else(|| vec![Vec2::ZERO; positions.len()]);
+            let tangents = reader
+                .read_tangents()
+                .map(|it| it.map(|t| Vec4::from(t)).collect())
+                .unwrap_or_else(|| {
+                    calculate_tangents(indices.clone().collect(), &positions, &normals, &tex_coords)
+                });
+
             let vertices = indices.map(|i| {
                 let index = i as usize;
-                let position = positions[index];
-                let normal = normals[index];
-                let tex_coord = tex_coords[index];
                 mere_mesh::Vertex {
-                    position,
-                    normal,
-                    tex_coord,
-                    color: Vec3::ONE,
+                    position: positions[index],
+                    normal: normals[index],
+                    tex_coord: tex_coords[index],
+                    tangent: tangents[index].into(),
                 }
             });
 
@@ -136,4 +140,76 @@ pub fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>
     mere_log::success!("Processed meshes in {path:?}");
 
     Ok(meshes)
+}
+
+fn calculate_tangents(
+    indices: Vec<u32>,
+    positions: &[Vec3],
+    normals: &[Vec3],
+    tex_coords: &[Vec2],
+) -> Vec<Vec4> {
+    let mut tangents = vec![Vec3::ZERO; positions.len()];
+    let mut bitangents = vec![Vec3::ZERO; positions.len()];
+
+    for chunk in indices.chunks(3) {
+        let i0 = chunk[0] as usize;
+        let i1 = chunk[1] as usize;
+        let i2 = chunk[2] as usize;
+
+        let edge0 = positions[i1] - positions[i0];
+        let edge1 = positions[i2] - positions[i0];
+        let delta_uv0 = tex_coords[i1] - tex_coords[i0];
+        let delta_uv1 = tex_coords[i2] - tex_coords[i0];
+
+        let det = delta_uv0.x * delta_uv1.y - delta_uv1.x * delta_uv0.y;
+
+        let (tangent, bitangent) = if det.abs() < f32::EPSILON {
+            let normal = normals[i0];
+            let helper = if normal.x.abs() < 0.9 {
+                Vec3::X
+            } else {
+                Vec3::Y
+            };
+            let t = normal.cross(helper);
+            let b = normal.cross(t);
+            (t, b)
+        } else {
+            let f = 1.0 / det;
+            (
+                (edge0 * delta_uv1.y - edge1 * delta_uv0.y) * f,
+                (edge1 * delta_uv0.x - edge0 * delta_uv1.x) * f,
+            )
+        };
+
+        tangents[i0] += tangent;
+        tangents[i1] += tangent;
+        tangents[i2] += tangent;
+
+        bitangents[i0] += bitangent;
+        bitangents[i1] += bitangent;
+        bitangents[i2] += bitangent;
+    }
+
+    tangents
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if t.length_squared() == 0.0 {
+                return Vec4::new(1.0, 0.0, 0.0, 1.0);
+            }
+
+            let b = bitangents[i];
+            let n = normals[i];
+
+            let t_ortho = (t - n * n.dot(t)).normalize();
+
+            let handedness = if n.cross(t_ortho).dot(b) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+
+            t_ortho.extend(handedness)
+        })
+        .collect()
 }

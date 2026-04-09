@@ -4,7 +4,6 @@ use image::GenericImageView;
 #[derive(Clone, Debug)]
 pub struct Texture {
     label: String,
-    pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
@@ -52,7 +51,6 @@ impl Texture {
 
         Self {
             label: label.to_string(),
-            texture,
             view,
             sampler,
         }
@@ -207,7 +205,6 @@ impl Texture {
 
         Ok(Self {
             label: label.to_string(),
-            texture,
             view,
             sampler,
         })
@@ -234,25 +231,19 @@ impl Texture {
 
 impl Texture {
     pub const DEFAULT_WHITE_TEXTURE_ID: ResourceHandle<Self> = ResourceHandle::new(0);
-    pub const DEFAULT_BLACK_TEXTURE_ID: ResourceHandle<Self> = ResourceHandle::new(1);
-    pub const DEFAULT_CHEQUERED_TEXTURE_ID: ResourceHandle<Self> = ResourceHandle::new(2);
+    pub const DEFAULT_CHEQUERED_TEXTURE_ID: ResourceHandle<Self> = ResourceHandle::new(1);
 
-    pub const DEFAULT_TEXTURES: [(ResourceHandle<Self>, &str, [u8; 16]); 3] = [
+    pub const DEFAULT_TEXTURES: [(ResourceHandle<Self>, &str, [u8; 16]); 2] = [
         (
             Self::DEFAULT_WHITE_TEXTURE_ID,
             "mere_default_white_texture",
             [0xff; 16],
         ),
         (
-            Self::DEFAULT_BLACK_TEXTURE_ID,
-            "mere_default_black_texture",
-            [0; 16],
-        ),
-        (
             Self::DEFAULT_CHEQUERED_TEXTURE_ID,
             "mere_default_chequered_texture",
             [
-                0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
+                0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff,
             ],
         ),
     ];

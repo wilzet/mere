@@ -10,10 +10,7 @@ use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use slotmap::DenseSlotMap;
-use std::{
-    any::{Any, TypeId},
-    path,
-};
+use std::path;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SceneObject {
@@ -171,7 +168,7 @@ fn background_load_task(
         asset_server.add(material);
     }
 
-    const DEFAULT_IMAGE_LOAD_MIP: u32 = 3;
+    const DEFAULT_IMAGE_LOAD_MIP: u32 = 2;
     gltf.images().par_iter().for_each(|image| {
         let label = match image.source() {
             gltf::image::Source::View { .. } => {
@@ -181,10 +178,19 @@ fn background_load_task(
             gltf::image::Source::Uri { uri, .. } => uri,
         };
 
+        let label_lower = label.to_lowercase();
+        let format = if label_lower.contains("normal") {
+            wgpu::TextureFormat::Rgba8Unorm
+        } else if label_lower.contains("roughness") && label_lower.contains("metalness") {
+            wgpu::TextureFormat::Rgba8Unorm
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        };
+
         let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
         let texture = match Texture::load((
             &image_path,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            format,
             DEFAULT_IMAGE_LOAD_MIP,
             &device,
             &queue,

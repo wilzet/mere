@@ -1,7 +1,9 @@
 use crate::{
     camera::{CameraController, CameraUniform},
     instance::InstanceRaw,
-    model::{DrawItem, DrawModel},
+    lights::LightUniform,
+    model::{DrawItem, DrawLight, DrawModel},
+    renderer::create_render_pipeline,
 };
 use mere_asset::{Camera, Material, Scene, Texture};
 use mere_math::{Quat, Vec3};
@@ -21,7 +23,9 @@ use winit::{
 
 mod camera;
 mod instance;
+mod lights;
 mod model;
+mod renderer;
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -29,9 +33,11 @@ pub struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
-    render_pipeline: wgpu::RenderPipeline,
+    opaque_render_pipeline: wgpu::RenderPipeline,
+    alpha_render_pipeline: wgpu::RenderPipeline,
+    light_pipeline: wgpu::RenderPipeline,
     window: Arc<Window>,
-    track_cursor: bool,
+    lock_cursor: bool,
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -40,6 +46,9 @@ pub struct State {
     stored_cursor_pos: (f64, f64),
     depth_texture: Texture,
     bg_color: wgpu::Color,
+    light_uniform: LightUniform,
+    light_buffer: wgpu::Buffer,
+    light_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
     scene: Scene,
 }
@@ -73,7 +82,7 @@ impl State {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Rendering device"),
-                required_features: wgpu::Features::empty(),
+                required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: Default::default(),
@@ -104,10 +113,10 @@ impl State {
             view_formats: vec![],
         };
 
-        let camera_controller = CameraController::new(5.0);
+        let camera_controller = CameraController::new(5.0, 0.002);
 
         let mut camera = Camera::new(
-            45.0,
+            45.0f32.to_radians(),
             config.width as f32 / config.height as f32,
             0.1,
             100.0,
@@ -129,7 +138,7 @@ impl State {
                 label: Some("camera_bind_group_layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -154,7 +163,7 @@ impl State {
 
         let instances = scene
             .objects()
-            .map(|obj| InstanceRaw::new(obj.transform.trs().to_cols_array_2d()))
+            .map(|obj| InstanceRaw::from_transform(obj.transform))
             .collect::<Vec<_>>();
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -163,59 +172,99 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
+        let light_uniform = LightUniform {
+            position: [1.5, 2.0, 1.5],
+            _padding: 0,
+            color: [1.0, 1.0, 1.0],
+            _padding2: 0,
+        };
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light VB"),
+            contents: bytemuck::cast_slice(&[light_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &light_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
+        });
+
+        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&camera_bind_group_layout),
+                    Some(&light_bind_group_layout),
                     Some(Material::material_bind_group_layout(&device)),
                 ],
                 immediate_size: 0,
             });
+        let forward_main_shader = wgpu::include_wgsl!("shader.wgsl");
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: Texture::DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let opaque_render_pipeline = create_render_pipeline(
+            &device,
+            &render_pipeline_layout,
+            config.format,
+            Some(Texture::DEPTH_FORMAT),
+            &[Vertex::desc(), InstanceRaw::desc()],
+            Some(wgpu::BlendState::REPLACE),
+            forward_main_shader.clone(),
+        );
+
+        let alpha_render_pipeline = create_render_pipeline(
+            &device,
+            &render_pipeline_layout,
+            config.format,
+            Some(Texture::DEPTH_FORMAT),
+            &[Vertex::desc(), InstanceRaw::desc()],
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+            forward_main_shader,
+        );
+
+        let light_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Light Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&camera_bind_group_layout),
+                    Some(&light_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
+
+            let shader = wgpu::include_wgsl!("light.wgsl");
+
+            create_render_pipeline(
+                &device,
+                &layout,
+                config.format,
+                Some(Texture::DEPTH_FORMAT),
+                &[Vertex::desc()],
+                Some(wgpu::BlendState::REPLACE),
+                shader,
+            )
+        };
 
         mere_log::success!("State initialization complete.");
 
@@ -225,9 +274,11 @@ impl State {
             queue,
             config,
             is_surface_configured: false,
-            render_pipeline,
+            opaque_render_pipeline,
+            alpha_render_pipeline,
+            light_pipeline,
             window,
-            track_cursor: false,
+            lock_cursor: false,
             camera,
             camera_uniform,
             camera_buffer,
@@ -241,6 +292,9 @@ impl State {
                 b: 0.3,
                 a: 1.0,
             },
+            light_uniform,
+            light_buffer,
+            light_bind_group,
             instance_buffer,
             scene,
         })
@@ -268,34 +322,10 @@ impl State {
         }
     }
 
-    pub fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
-        if let MouseButton::Left = button {
-            self.track_cursor = is_pressed;
-            self.window.set_cursor_visible(!is_pressed);
-
-            if is_pressed {
-                let (width, height): (f64, f64) = self.window.inner_size().into();
-                let _ = self
-                    .window
-                    .set_cursor_position(winit::dpi::PhysicalPosition::new(
-                        width * 0.5,
-                        height * 0.5,
-                    ));
-            } else {
-                let _ = self
-                    .window
-                    .set_cursor_position(winit::dpi::PhysicalPosition::new(
-                        self.stored_cursor_pos.0,
-                        self.stored_cursor_pos.1,
-                    ));
-            }
-        }
-    }
-
     pub fn handle_mouse_moved(&mut self, x: f64, y: f64) {
         let (width, height): (f64, f64) = self.window.inner_size().into();
 
-        if !self.track_cursor {
+        if !self.lock_cursor {
             let r = (x / width).clamp(0.0, 1.0);
             let g = (y / height).clamp(0.0, 1.0);
             self.bg_color = wgpu::Color {
@@ -318,15 +348,39 @@ impl State {
             return;
         }
 
-        let sensitivity = 0.002;
-
-        let yaw = Quat::from_rotation_y(-dx as f32 * sensitivity);
-        let pitch = Quat::from_rotation_x(-dy as f32 * sensitivity);
-        self.camera.transform().rotation = yaw * self.camera.transform().rotation * pitch;
+        self.camera_controller.handle_mouse_move(dx, dy);
 
         let _ = self
             .window
             .set_cursor_position(winit::dpi::PhysicalPosition::new(center_x, center_y));
+    }
+
+    pub fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
+        if let MouseButton::Left = button {
+            self.lock_cursor = is_pressed;
+            self.window.set_cursor_visible(!is_pressed);
+
+            if is_pressed {
+                let (width, height): (f64, f64) = self.window.inner_size().into();
+                let _ = self
+                    .window
+                    .set_cursor_position(winit::dpi::PhysicalPosition::new(
+                        width * 0.5,
+                        height * 0.5,
+                    ));
+            } else {
+                let _ = self
+                    .window
+                    .set_cursor_position(winit::dpi::PhysicalPosition::new(
+                        self.stored_cursor_pos.0,
+                        self.stored_cursor_pos.1,
+                    ));
+            }
+        }
+    }
+
+    pub fn handle_mouse_scroll(&mut self, delta: MouseScrollDelta) {
+        self.camera_controller.handle_mouse_scroll(&delta)
     }
 
     pub fn update(&mut self, delta_time: Duration) {
@@ -340,6 +394,15 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
+        let old_position = Vec3::from(self.light_uniform.position);
+        self.light_uniform.position =
+            (Quat::from_axis_angle(Vec3::Y, dt * 36.0f32.to_radians()) * old_position).into();
+        self.queue.write_buffer(
+            &self.light_buffer,
+            0,
+            bytemuck::cast_slice(&[self.light_uniform]),
+        );
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -351,7 +414,8 @@ impl State {
         let default_material = default_lock.read();
         let default_bg = default_material.bind_group.as_ref().unwrap();
 
-        let mut draw_items = Vec::new();
+        let mut opaque_draw_items = Vec::new();
+        let mut alpha_draw_items = Vec::new();
         for (i, object) in self.scene.objects().enumerate() {
             if let Some(model) = self.scene.get_model(object.handle()) {
                 for mesh in model.read().meshes() {
@@ -362,11 +426,17 @@ impl State {
                         None => default_bg,
                     };
 
-                    draw_items.push(DrawItem {
-                        instance_index: i,
+                    let item = DrawItem {
+                        instance_index: i as u32,
                         mesh: mesh.clone(),
                         material: bind_group.clone(),
-                    });
+                    };
+
+                    if material.alpha_blended {
+                        alpha_draw_items.push(item);
+                    } else {
+                        opaque_draw_items.push(item);
+                    }
                 }
             }
         }
@@ -421,19 +491,30 @@ impl State {
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-            for DrawItem {
-                instance_index: i,
-                mesh,
-                material,
-            } in &draw_items
-            {
-                render_pass.set_bind_group(1, material, &[]);
-                render_pass.draw_mesh_instanced(mesh, *i as u32..*i as u32 + 1);
+            render_pass.set_pipeline(&self.light_pipeline);
+            if let Some(mesh) = opaque_draw_items.get(26) {
+                render_pass.draw_light_mesh(
+                    mesh.clone(),
+                    &self.camera_bind_group,
+                    &self.light_bind_group,
+                );
             }
+
+            render_pass.set_pipeline(&self.opaque_render_pipeline);
+            render_pass.draw_meshes(
+                opaque_draw_items,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
+
+            render_pass.set_pipeline(&self.alpha_render_pipeline);
+            render_pass.draw_meshes(
+                alpha_draw_items,
+                &self.camera_bind_group,
+                &self.light_bind_group,
+            );
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -514,6 +595,7 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => state.handle_mouse_input(button, key_state.is_pressed()),
+            WindowEvent::MouseWheel { delta, .. } => state.handle_mouse_scroll(delta),
             _ => (),
         }
     }
