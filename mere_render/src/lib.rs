@@ -160,7 +160,9 @@ impl State {
         let mut scene = Scene::new(&device, &queue);
         scene.load_gltf("sponza/main_sponza", &device, &queue)?;
         scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
-
+        let teapot = scene.load_gltf("utah_teapot", &device, &queue)?[0];
+        scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
+        
         let instances = scene
             .objects()
             .map(|obj| InstanceRaw::from_transform(obj.transform))

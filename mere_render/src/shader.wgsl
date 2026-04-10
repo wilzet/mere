@@ -166,5 +166,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let color = ambient + lo;
 
-    return vec4(color, alpha);
+    return vec4(color, properties.color.a);
 }
