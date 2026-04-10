@@ -21,8 +21,7 @@ impl Camera {
     }
 
     pub fn look_at(&mut self, target: Vec3) {
-        let direction = (target - self.transform.translation).normalize();
-        self.transform.rotation = Quat::look_to_rh(direction, self.transform.up());
+        self.transform.rotation = Quat::look_at_rh(self.transform.translation, target, self.transform.up());
     }
 
     pub fn view_matrix(&self) -> Mat4 {

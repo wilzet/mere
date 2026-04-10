@@ -10,6 +10,9 @@ members = ["mere_asset", "mere_asset/common", "mere_common", "mere_log", "mere_m
 [workspace.dependencies]
 anyhow = "1.0.102"
 bytemuck = { version = "1.25.0", features = ["derive"] }
+egui = "0.34.1"
+egui-wgpu = { version = "0.34.1", features = ["winit"] }
+egui-winit = "0.34.1"
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
 image = { version = "0.25.10", default-features = false, features = ["rayon", "png", "hdr"] }
 meshopt = "0.6.2"

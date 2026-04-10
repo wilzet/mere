@@ -1,5 +1,6 @@
 use crate::{
     camera::{CameraController, CameraUniform},
+    egui_render::EguiRenderer,
     instance::InstanceRaw,
     lights::LightUniform,
     model::{DrawItem, DrawLight, DrawModel},
@@ -22,6 +23,7 @@ use winit::{
 };
 
 mod camera;
+mod egui_render;
 mod instance;
 mod lights;
 mod model;
@@ -32,6 +34,8 @@ pub struct State {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    egui_renderer: EguiRenderer,
+    scale_factor: f32,
     is_surface_configured: bool,
     opaque_render_pipeline: wgpu::RenderPipeline,
     alpha_render_pipeline: wgpu::RenderPipeline,
@@ -158,11 +162,11 @@ impl State {
         });
 
         let mut scene = Scene::new(&device, &queue);
-        scene.load_gltf("sponza/main_sponza", &device, &queue)?;
-        scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
+        //scene.load_gltf("sponza/main_sponza", &device, &queue)?;
+        //scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
         let teapot = scene.load_gltf("utah_teapot", &device, &queue)?[0];
         scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
-        
+
         let instances = scene
             .objects()
             .map(|obj| InstanceRaw::from_transform(obj.transform))
@@ -268,6 +272,8 @@ impl State {
             )
         };
 
+        let egui_renderer = EguiRenderer::new(&device, config.format, None, 1, &window);
+
         mere_log::success!("State initialization complete.");
 
         Ok(Self {
@@ -275,6 +281,8 @@ impl State {
             device,
             queue,
             config,
+            egui_renderer,
+            scale_factor: 1.0,
             is_surface_configured: false,
             opaque_render_pipeline,
             alpha_render_pipeline,
@@ -519,6 +527,50 @@ impl State {
             );
         }
 
+        {
+            self.egui_renderer.begin_frame(&self.window);
+
+            egui::Window::new("winit + egui + wgpu says hello!")
+                .resizable(true)
+                .vscroll(true)
+                .default_open(false)
+                .show(self.egui_renderer.context(), |ui| {
+                    ui.label("Label!");
+
+                    if ui.button("Button!").clicked() {
+                        println!("boom!")
+                    }
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "Pixels per point: {}",
+                            self.egui_renderer.context().pixels_per_point()
+                        ));
+                        if ui.button("-").clicked() {
+                            self.scale_factor = (self.scale_factor - 0.1).max(0.3);
+                        }
+                        if ui.button("+").clicked() {
+                            self.scale_factor = (self.scale_factor + 0.1).min(3.0);
+                        }
+                    });
+                });
+
+            let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [self.config.width, self.config.height],
+                pixels_per_point: self.window.scale_factor() as f32 * self.scale_factor,
+            };
+
+            self.egui_renderer.end_frame_and_draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &self.window,
+                &view,
+                screen_descriptor,
+            );
+        }
+
         self.queue.submit(Some(encoder.finish()));
         output.present();
 
@@ -566,6 +618,8 @@ impl ApplicationHandler for App {
             None => return,
         };
 
+        let ui_input = state.egui_renderer.handle_input(&state.window, &event);
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
@@ -596,7 +650,7 @@ impl ApplicationHandler for App {
                 state: key_state,
                 button,
                 ..
-            } => state.handle_mouse_input(button, key_state.is_pressed()),
+            } if !ui_input => state.handle_mouse_input(button, key_state.is_pressed()),
             WindowEvent::MouseWheel { delta, .. } => state.handle_mouse_scroll(delta),
             _ => (),
         }
