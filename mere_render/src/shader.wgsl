@@ -25,9 +25,9 @@ var<uniform> light: Light;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) tex_coord: vec2<f32>,
-    @location(3) tangent: vec4<f32>,
+    @location(1) normal: u32,
+    @location(2) tex_coord: u32,
+    @location(3) tangent: u32,
 }
 
 struct InstanceInput {
@@ -45,6 +45,21 @@ struct VertexOutput {
     @location(0) tex_coord: vec2<f32>,
     @location(1) tangent_view_dir: vec3<f32>,
     @location(2) tangent_light_dir: vec3<f32>,
+}
+
+fn unpack_11_11_10(value: u32) -> vec3<f32> {
+    let x = f32(value & 0x7ff) / f32(0x7ff);
+    let y = f32((value >> 11) & 0x7ff) / f32(0x7ff);
+    let z = f32(value >> 22) / f32(0x3ff);
+    return vec3(x, y, z) * 2.0 - 1.0;
+}
+
+fn unpack_10_10_10_2(value: u32) -> vec4<f32> {
+    let x = f32(value & 0x3ff) / f32(0x3ff);
+    let y = f32((value >> 10) & 0x3ff) / f32(0x3ff);
+    let z = f32((value >> 20) & 0x3ff) / f32(0x3ff);
+    let w = f32(value >> 30);
+    return vec4(x, y, z, w) * 2.0 - 1.0;
 }
 
 @vertex
@@ -65,14 +80,17 @@ fn vs_main(
         instance.normal_matrix_2,
     );
 
+    let normal = unpack_11_11_10(model.normal);
+    let tangent = unpack_10_10_10_2(model.tangent);
+
     let world_position = model_matrix * vec4(model.position, 1.0);
-    let world_normal = normalize(normal_matrix * model.normal);
-    let world_tangent = normalize(normal_matrix * model.tangent.xyz);
-    let world_bitangent = normalize(cross(world_normal, world_tangent));
+    let world_normal = normalize(normal_matrix * normal);
+    let world_tangent = normalize(normal_matrix * tangent.xyz);
+    let world_bitangent = normalize(cross(world_normal, world_tangent) * tangent.w);
     let tangent_matrix = transpose(mat3x3(world_tangent, world_bitangent, world_normal));
 
     out.clip_position = camera.view_proj * world_position;
-    out.tex_coord = model.tex_coord;
+    out.tex_coord = unpack2x16float(model.tex_coord);
 
     let view_dir_world = camera.view_pos.xyz - world_position.xyz;
     let light_dir_world = light.position - world_position.xyz;

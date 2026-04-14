@@ -1,10 +1,11 @@
 use anyhow::Context;
-use common::{collect_gltf_files, write_mere_file};
+use common::{collect_gltf_files, pack_10_10_10_2, pack_11_11_10, pack_16_16, write_mere_file};
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_math::{Vec2, Vec3, Vec4};
+use mere_math::{Vec2, Vec3};
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -83,71 +84,92 @@ fn hash_files(paths: &[PathBuf]) -> anyhow::Result<Vec<u8>> {
     let mut hasher = blake3::Hasher::new();
 
     for path in paths {
-        let data = fs::read(path)?;
-        hasher.update(&data);
+        let mut file = fs::File::open(path)?;
+
+        io::copy(&mut file, &mut hasher)?;
     }
 
     Ok(hasher.finalize().as_bytes().into())
 }
 
 pub fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
-    let mut meshes = Vec::new();
-
+    let start = Instant::now();
     let (gltf, buffers, _) = gltf::import(path)?;
-    for model in gltf.meshes() {
-        for primitive in model.primitives() {
-            let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+    let meshes = gltf
+        .meshes()
+        .into_iter()
+        .flat_map(|model| {
+            model
+                .primitives()
+                .map(|primitive| {
+                    let reader = primitive.reader(|b| Some(&buffers[b.index()]));
 
-            let indices = reader.read_indices().unwrap().into_u32();
-            let index_count = indices.len();
+                    let indices = reader
+                        .read_indices()
+                        .unwrap()
+                        .into_u32()
+                        .collect::<Vec<_>>();
+                    let index_count = indices.len();
 
-            let positions = reader
-                .read_positions()
-                .unwrap()
-                .map(|p| Vec3::from(p))
-                .collect::<Vec<_>>();
-            let normals = reader
-                .read_normals()
-                .map(|it| it.map(|n| Vec3::from(n)).collect())
-                .unwrap_or_else(|| vec![Vec3::ZERO; positions.len()]);
-            let tex_coords = reader
-                .read_tex_coords(0)
-                .map(|it| it.into_f32().map(|t| Vec2::from(t)).collect())
-                .unwrap_or_else(|| vec![Vec2::ZERO; positions.len()]);
-            let tangents = reader
-                .read_tangents()
-                .map(|it| it.map(|t| Vec4::from(t)).collect())
-                .unwrap_or_else(|| {
-                    calculate_tangents(indices.clone().collect(), &positions, &normals, &tex_coords)
-                });
+                    let positions = reader
+                        .read_positions()
+                        .unwrap()
+                        .map(Vec3::from)
+                        .collect::<Vec<_>>();
+                    let normals = reader.read_normals().map_or_else(
+                        || vec![Vec3::ZERO; positions.len()],
+                        |it| it.map(Vec3::from).collect(),
+                    );
+                    let tex_coords = reader.read_tex_coords(0).map_or_else(
+                        || vec![Vec2::ZERO; positions.len()],
+                        |it| it.into_f32().map(Vec2::from).collect(),
+                    );
+                    let tangents = reader.read_tangents().map_or_else(
+                        || calculate_tangents(&indices, &positions, &normals, &tex_coords),
+                        |it| {
+                            it.map(|t| {
+                                pack_10_10_10_2(
+                                    Vec3::new(t[0], t[1], t[2]),
+                                    ((t[3].signum() as i32 + 1) >> 1) as u32,
+                                )
+                            })
+                            .collect()
+                        },
+                    );
 
-            let vertices = indices.map(|i| {
-                let index = i as usize;
-                mere_mesh::Vertex {
-                    position: positions[index],
-                    normal: normals[index],
-                    tex_coord: tex_coords[index],
-                    tangent: tangents[index].into(),
-                }
-            });
+                    let normals = normals.into_iter().map(pack_11_11_10).collect::<Vec<_>>();
+                    let tex_coords = tex_coords.into_iter().map(pack_16_16).collect::<Vec<_>>();
 
-            let mut mesh = mere_mesh::MereMesh::new(vertices, index_count);
-            mesh.optimize_mesh();
-            meshes.push(mesh);
-        }
-    }
+                    let vertices = indices.into_iter().map(|i| {
+                        let index = i as usize;
+                        mere_mesh::Vertex {
+                            position: positions[index],
+                            normal: normals[index],
+                            tex_coord: tex_coords[index],
+                            tangent: tangents[index],
+                        }
+                    });
 
-    mere_log::success!("Processed meshes in {path:?}");
+                    let mut mesh = mere_mesh::MereMesh::new(vertices, index_count);
+                    mesh.optimize_mesh();
+                    mesh
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let time = Instant::now() - start;
+    mere_log::success!("Processed meshes in {path:?} ({:.3} ms)", time.as_millis());
 
     Ok(meshes)
 }
 
 fn calculate_tangents(
-    indices: Vec<u32>,
+    indices: &[u32],
     positions: &[Vec3],
     normals: &[Vec3],
     tex_coords: &[Vec2],
-) -> Vec<Vec4> {
+) -> Vec<u32> {
     let mut tangents = vec![Vec3::ZERO; positions.len()];
     let mut bitangents = vec![Vec3::ZERO; positions.len()];
 
@@ -158,6 +180,7 @@ fn calculate_tangents(
 
         let edge0 = positions[i1] - positions[i0];
         let edge1 = positions[i2] - positions[i0];
+
         let delta_uv0 = tex_coords[i1] - tex_coords[i0];
         let delta_uv1 = tex_coords[i2] - tex_coords[i0];
 
@@ -195,7 +218,7 @@ fn calculate_tangents(
         .enumerate()
         .map(|(i, t)| {
             if t.length_squared() == 0.0 {
-                return Vec4::new(1.0, 0.0, 0.0, 1.0);
+                return pack_10_10_10_2(Vec3::X, 1);
             }
 
             let b = bitangents[i];
@@ -204,12 +227,13 @@ fn calculate_tangents(
             let t_ortho = (t - n * n.dot(t)).normalize();
 
             let handedness = if n.cross(t_ortho).dot(b) < 0.0 {
-                -1.0
+                //negative
+                0
             } else {
-                1.0
+                1
             };
 
-            t_ortho.extend(handedness)
+            pack_10_10_10_2(t_ortho, handedness)
         })
         .collect()
 }

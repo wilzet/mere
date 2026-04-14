@@ -117,6 +117,23 @@ impl State {
             view_formats: vec![],
         };
 
+        let mut scene = Scene::new(&device, &queue);
+        scene.load_gltf("sponza/main_sponza", &device, &queue)?;
+        scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
+        let teapot = scene.load_gltf("utah_teapot", &device, &queue)?[0];
+        scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
+
+        let instances = scene
+            .objects()
+            .map(|obj| InstanceRaw::from_transform(obj.transform))
+            .collect::<Vec<_>>();
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instances),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let camera_controller = CameraController::new(5.0, 0.002);
 
         let mut camera = Camera::new(
@@ -124,9 +141,9 @@ impl State {
             config.width as f32 / config.height as f32,
             0.1,
             100.0,
-            Vec3::new(0.0, 1.0, 2.0),
+            Vec3::new(5.0, 5.0, -5.0),
         );
-        camera.look_at(Vec3::ZERO);
+        camera.look_at(scene.get_object(teapot).unwrap().transform.translation);
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
@@ -159,23 +176,6 @@ impl State {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
             }],
-        });
-
-        let mut scene = Scene::new(&device, &queue);
-        //scene.load_gltf("sponza/main_sponza", &device, &queue)?;
-        //scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
-        let teapot = scene.load_gltf("utah_teapot", &device, &queue)?[0];
-        scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
-
-        let instances = scene
-            .objects()
-            .map(|obj| InstanceRaw::from_transform(obj.transform))
-            .collect::<Vec<_>>();
-
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX,
         });
 
         let light_uniform = LightUniform {
@@ -315,6 +315,8 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+
+            self.camera.resize(width as f32 / height as f32);
 
             self.depth_texture =
                 Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
@@ -530,15 +532,26 @@ impl State {
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            egui::Window::new("winit + egui + wgpu says hello!")
+            egui::Window::new("Debug")
                 .resizable(true)
                 .vscroll(true)
-                .default_open(false)
+                .default_open(true)
                 .show(self.egui_renderer.context(), |ui| {
-                    ui.label("Label!");
+                    //ui.label("");
 
-                    if ui.button("Button!").clicked() {
-                        println!("boom!")
+                    if ui.button("Positions!").clicked() {
+                        for object in self.scene.objects() {
+                            println!(
+                                "{} {:?}",
+                                object.transform.translation,
+                                object.transform.rotation.to_euler(Default::default())
+                            );
+                        }
+                        println!(
+                            "{} {:?}",
+                            self.camera.transform.translation,
+                            self.camera.transform.rotation.to_euler(Default::default())
+                        );
                     }
 
                     ui.separator();

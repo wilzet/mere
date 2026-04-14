@@ -1,12 +1,12 @@
-use mere_math::{Vec2, Vec3};
+use mere_math::{Vec3};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vertex {
     pub position: Vec3,
-    pub normal: Vec3,
-    pub tex_coord: Vec2,
-    pub tangent: [f32; 4],
+    pub normal: u32,
+    pub tex_coord: u32,
+    pub tangent: u32,
 }
 
 unsafe impl bytemuck::Zeroable for Vertex {}
@@ -19,7 +19,7 @@ impl meshopt::DecodePosition for Vertex {
 }
 
 impl Vertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Uint32, 3 => Uint32];
 
     pub const fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {

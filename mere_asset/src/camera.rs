@@ -21,7 +21,12 @@ impl Camera {
     }
 
     pub fn look_at(&mut self, target: Vec3) {
-        self.transform.rotation = Quat::look_at_rh(self.transform.translation, target, self.transform.up());
+        self.transform.rotation =
+            Quat::look_at_rh(self.transform.translation, target, self.transform.up()).conjugate();
+    }
+
+    pub fn resize(&mut self, aspect: f32) {
+        self.aspect = aspect;
     }
 
     pub fn view_matrix(&self) -> Mat4 {

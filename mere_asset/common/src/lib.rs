@@ -1,3 +1,5 @@
+use half::f16;
+use mere_math::{Vec2, Vec3};
 use mere_mesh::MereMesh;
 use std::{
     fs,
@@ -55,4 +57,25 @@ pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MereMesh>> {
     }
 
     Ok(meshes)
+}
+
+pub fn pack_11_11_10(value: Vec3) -> u32 {
+    let x = ((value.x * 0.5 + 0.5) * 0x7ff as f32) as u32;
+    let y = ((value.y * 0.5 + 0.5) * 0x7ff as f32) as u32;
+    let z = ((value.z * 0.5 + 0.5) * 0x3ff as f32) as u32;
+    x | (y << 11) | (z << 22)
+}
+
+pub fn pack_16_16(value: Vec2) -> u32 {
+    let x = f16::from_f32(value.x).to_bits() as u32;
+    let y = f16::from_f32(value.y).to_bits() as u32;
+    x | (y << 16)
+}
+
+pub fn pack_10_10_10_2(value: Vec3, extra: u32) -> u32 {
+    let x = ((value.x * 0.5 + 0.5) * 0x3ff as f32) as u32;
+    let y = ((value.y * 0.5 + 0.5) * 0x3ff as f32) as u32;
+    let z = ((value.z * 0.5 + 0.5) * 0x3ff as f32) as u32;
+    let last = extra & 0x3;
+    x | (y << 10) | (z << 20) | (last << 30)
 }
