@@ -13,6 +13,7 @@ mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
+rayon.workspace = true
 
 [dependencies]
 anyhow.workspace = true
