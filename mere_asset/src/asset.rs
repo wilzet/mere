@@ -1,7 +1,8 @@
 use crate::{
-    Material, Mesh, Model, Texture,
+    Material, Mesh, Model,
     asset_server::AssetServer,
     handle::{ResourceHandle, UntypedHandle},
+    texture::{Texture, TextureOptions},
 };
 use common::{collect_gltf_files, read_mere_file};
 use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
@@ -50,22 +51,28 @@ impl Asset for Model {
 impl Asset for Texture {
     type Source<'a> = (
         &'a path::Path,
-        wgpu::TextureFormat,
-        u32,
         &'a wgpu::Device,
         &'a wgpu::Queue,
+        TextureOptions,
+        u32
     );
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
-        let (path, format, mip, device, queue) = source;
+        let (path, device, queue, options, mip_0) = source;
 
         let label = match path.file_name().map_or(None, |s| s.to_str()) {
             Some(name) => name,
             None => anyhow::bail!("No file found in path: {path:?}"),
         };
 
-        let image = load_image(path, mip)?;
-        Ok(Self::from_image(device, queue, image, label, format)?)
+        let image = load_image(path, mip_0)?;
+        Ok(Self::from_image(
+            device,
+            queue,
+            image,
+            label,
+            options,
+        )?)
     }
 
     fn dependencies(&self) -> Vec<UntypedHandle> {

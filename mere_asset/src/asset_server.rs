@@ -2,6 +2,7 @@ use crate::{
     Material, Model, Texture,
     asset::Asset,
     handle::{ResourceHandle, UntypedHandle},
+    texture,
 };
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use parking_lot::RwLock;
@@ -52,13 +53,10 @@ impl AssetServer {
                     queue,
                     2,
                     2,
-                    &color,
+                    color.to_vec(),
                     label,
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    wgpu::AddressMode::Repeat,
-                    wgpu::FilterMode::Nearest,
-                    wgpu::FilterMode::Nearest,
-                    wgpu::MipmapFilterMode::Nearest,
+                    texture::TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+                        .with_mag_min_filter(wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest),
                 ) {
                     Ok(tex) => tex,
                     Err(err) => {

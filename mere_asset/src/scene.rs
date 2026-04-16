@@ -1,10 +1,11 @@
 use crate::{
-    Camera, Texture,
     asset::{Asset, GltfAsset, load_gltf_asset, load_mere_asset},
     asset_server::{AssetEvent, AssetServer, Atomic, DefaultResource, Resource},
+    camera::Camera,
     handle::ResourceHandle,
     material::Material,
     model::Model,
+    texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
@@ -168,7 +169,10 @@ fn background_load_task(
         asset_server.add(material);
     }
 
-    const DEFAULT_IMAGE_LOAD_MIP: u32 = 2;
+    const DEFAULT_IMAGE_LOAD_MIP: u32 = 1;
+    const NORMAL_ANISOTROPY: u16 = 8;
+    const ROUGH_METAL_ANISOTROPY: u16 = 8;
+    const DIFFUSE_ANISOTROPY: u16 = 16;
     gltf.images().par_iter().for_each(|image| {
         let label = match image.source() {
             gltf::image::Source::View { .. } => {
@@ -179,21 +183,24 @@ fn background_load_task(
         };
 
         let label_lower = label.to_lowercase();
-        let format = if label_lower.contains("normal") {
-            wgpu::TextureFormat::Rgba8Unorm
+        let options = if label_lower.contains("normal") {
+            TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+                .with_mipmap(MipmapOptions::Auto, Some(NORMAL_ANISOTROPY))
         } else if label_lower.contains("roughness") && label_lower.contains("metalness") {
-            wgpu::TextureFormat::Rgba8Unorm
+            TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+                .with_mipmap(MipmapOptions::Auto, Some(ROUGH_METAL_ANISOTROPY))
         } else {
-            wgpu::TextureFormat::Rgba8UnormSrgb
+            TextureOptions::texture(wgpu::TextureFormat::Rgba8UnormSrgb)
+                .with_mipmap(MipmapOptions::Auto, Some(DIFFUSE_ANISOTROPY))
         };
 
         let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
         let texture = match Texture::load((
             &image_path,
-            format,
-            DEFAULT_IMAGE_LOAD_MIP,
             &device,
             &queue,
+            options,
+            DEFAULT_IMAGE_LOAD_MIP,
         )) {
             Ok(tex) => tex,
             Err(err) => {
