@@ -417,7 +417,7 @@ impl State {
         );
     }
 
-    pub fn render(&mut self) -> anyhow::Result<()> {
+    pub fn render(&mut self, delta_time: Duration) -> anyhow::Result<()> {
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -531,13 +531,16 @@ impl State {
 
         {
             self.egui_renderer.begin_frame(&self.window);
+            let (width, height): (f64, f64) = self.window.inner_size().into();
 
-            egui::Window::new("Debug")
+            egui::Window::new(format!("Debug {width}x{height}"))
                 .resizable(true)
                 .vscroll(true)
                 .default_open(true)
                 .show(self.egui_renderer.context(), |ui| {
-                    //ui.label("");
+                    let frame_time = delta_time.as_secs_f32();
+                    let fps = (1.0 / frame_time) as u32;
+                    ui.label(format!("{:.01} ms / {:>4} fps", frame_time * 1000.0, fps));
 
                     if ui.button("Positions!").clicked() {
                         for object in self.scene.objects() {
@@ -641,7 +644,7 @@ impl ApplicationHandler for App {
                 let dt = now - self.last_frame_time;
                 self.last_frame_time = now;
                 state.update(dt);
-                if let Err(err) = state.render() {
+                if let Err(err) = state.render(dt) {
                     mere_log::error!("{err}");
                     event_loop.exit();
                 }
