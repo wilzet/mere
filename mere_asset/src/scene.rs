@@ -170,49 +170,47 @@ fn background_load_task(
     }
 
     const DEFAULT_IMAGE_LOAD_MIP: u32 = 1;
-    const NORMAL_ANISOTROPY: u16 = 8;
-    const ROUGH_METAL_ANISOTROPY: u16 = 8;
-    const DIFFUSE_ANISOTROPY: u16 = 16;
     gltf.images().par_iter().for_each(|image| {
-        let label = match image.source() {
+        let uri = match image.source() {
+            gltf::image::Source::Uri { uri, .. } => uri,
             gltf::image::Source::View { .. } => {
                 mere_log::error!("Unsupported image source");
                 return;
             }
-            gltf::image::Source::Uri { uri, .. } => uri,
         };
 
-        let label_lower = label.to_lowercase();
-        let options = if label_lower.contains("normal") {
-            TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
-                .with_mipmap(MipmapOptions::Auto, Some(NORMAL_ANISOTROPY))
-        } else if label_lower.contains("roughness") && label_lower.contains("metalness") {
-            TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
-                .with_mipmap(MipmapOptions::Auto, Some(ROUGH_METAL_ANISOTROPY))
-        } else {
-            TextureOptions::texture(wgpu::TextureFormat::Rgba8UnormSrgb)
-                .with_mipmap(MipmapOptions::Auto, Some(DIFFUSE_ANISOTROPY))
-        };
+        let options = texture_options(uri);
+        let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(uri);
 
-        let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
-        let texture = match Texture::load((
+        match Texture::load((
             &image_path,
             &device,
             &queue,
             options,
             DEFAULT_IMAGE_LOAD_MIP,
         )) {
-            Ok(tex) => tex,
-            Err(err) => {
-                mere_log::error!("{err}");
-                return;
+            Ok(tex) => {
+                asset_server.clone().add(tex);
             }
+            Err(err) => mere_log::error!("Failed to load texture {uri}: {err}"),
         };
-
-        asset_server.clone().add(texture);
     });
 
     mere_log::success!("Loaded {path}");
 
     Ok(())
+}
+
+fn texture_options(uri: &str) -> TextureOptions {
+    const DIFFUSE_ANISOTROPY: u16 = 8;
+    const OTHER_ANISOTROPY: u16 = 8;
+
+    let lower = uri.to_lowercase();
+    if lower.contains("normal") || (lower.contains("roughness") && lower.contains("metalness")) {
+        TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+            .with_mipmap(MipmapOptions::auto(Some(OTHER_ANISOTROPY)))
+    } else {
+        TextureOptions::texture(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .with_mipmap(MipmapOptions::auto(Some(DIFFUSE_ANISOTROPY)))
+    }
 }

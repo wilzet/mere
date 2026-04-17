@@ -3,61 +3,81 @@ use image::GenericImageView;
 use std::num::NonZero;
 
 #[derive(Clone, Copy, Default, Debug)]
-pub enum MipmapOptions {
+pub enum MipmapLevels {
     #[default]
     None,
     Auto,
-    AutoWithFilter {
-        filter: wgpu::MipmapFilterMode,
-    },
-    Custom {
-        levels: NonZero<u32>,
-        filter: wgpu::MipmapFilterMode,
-    },
+    Levels(NonZero<u32>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MipmapOptions {
+    levels: MipmapLevels,
+    filter: wgpu::MipmapFilterMode,
+    anisotropy: NonZero<u16>,
 }
 
 impl MipmapOptions {
     const MIPMAP_LEVEL_BOUND: u32 = 32;
 
+    pub fn new(
+        levels: MipmapLevels,
+        filter: wgpu::MipmapFilterMode,
+        anisotropy: Option<u16>,
+    ) -> Self {
+        Self {
+            levels,
+            filter,
+            anisotropy: unsafe {
+                // SAFETY: Either non-zero or 1
+                NonZero::new_unchecked(anisotropy.map_or(1, |a| a.max(1)))
+            },
+        }
+    }
+
+    pub fn auto(anisotropy: Option<u16>) -> Self {
+        let filter = match anisotropy {
+            Some(_) => wgpu::MipmapFilterMode::Linear,
+            None => wgpu::MipmapFilterMode::Nearest,
+        };
+        Self::new(MipmapLevels::Auto, filter, anisotropy)
+    }
+
     fn levels(&self) -> u32 {
-        match self {
-            Self::None => 1,
-            Self::Auto => Self::MIPMAP_LEVEL_BOUND,
-            Self::AutoWithFilter { .. } => Self::MIPMAP_LEVEL_BOUND,
-            Self::Custom { levels, .. } => levels.get(),
+        match self.levels {
+            MipmapLevels::None => 1,
+            MipmapLevels::Auto => Self::MIPMAP_LEVEL_BOUND,
+            MipmapLevels::Levels(levels) => levels.get(),
         }
     }
 
     fn filter(&self) -> wgpu::MipmapFilterMode {
-        match self {
-            Self::None => wgpu::MipmapFilterMode::Nearest,
-            Self::Auto => wgpu::MipmapFilterMode::Linear,
-            Self::AutoWithFilter { filter } => *filter,
-            Self::Custom { filter, .. } => *filter,
-        }
+        self.filter
+    }
+
+    fn anisotropy(&self) -> u16 {
+        self.anisotropy.get()
     }
 
     fn try_auto_generate(&mut self, width: u32, height: u32) {
-        *self = match self {
-            Self::Auto => {
-                let extent = width.max(height);
-                let mip_level_count = (extent as f32).log2().floor() as u32 + 1;
-                // SAFETY: Even in worst case (width & height equals 0), +1 ensures non-zero
-                Self::Custom {
-                    levels: unsafe { NonZero::new_unchecked(mip_level_count) },
-                    filter: wgpu::MipmapFilterMode::Linear,
-                }
-            }
-            Self::AutoWithFilter { filter } => {
-                let extent = width.max(height);
-                let mip_level_count = (extent as f32).log2().floor() as u32 + 1;
-                // SAFETY: Even in worst case (width & height equals 0), +1 ensures non-zero
-                Self::Custom {
-                    levels: unsafe { NonZero::new_unchecked(mip_level_count) },
-                    filter: *filter,
-                }
-            }
-            _ => *self,
+        let extent = width.max(height);
+        let mip_level_count = (extent as f32).log2().floor() as u32 + 1;
+        let target_levels = self.levels().min(mip_level_count);
+
+        // SAFETY: Even in worst case (width & height equals 0), +1 ensures non-zero. Also Self::levels returns non zero
+        self.levels = MipmapLevels::Levels(unsafe { NonZero::new_unchecked(target_levels) });
+    }
+}
+
+impl Default for MipmapOptions {
+    fn default() -> Self {
+        Self {
+            levels: MipmapLevels::None,
+            filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy: unsafe {
+                // SAFETY: 1 is not 0 (trust me)
+                NonZero::new_unchecked(1)
+            },
         }
     }
 }
@@ -70,7 +90,6 @@ pub struct TextureOptions {
     mag_filter: wgpu::FilterMode,
     min_filter: wgpu::FilterMode,
     mipmap: MipmapOptions,
-    anisotropy: u16,
 }
 
 impl TextureOptions {
@@ -110,12 +129,8 @@ impl TextureOptions {
         }
     }
 
-    pub fn with_mipmap(self, mipmap: MipmapOptions, anisotropy: Option<u16>) -> Self {
-        Self {
-            mipmap,
-            anisotropy: anisotropy.unwrap_or(1),
-            ..self
-        }
+    pub fn with_mipmap(self, mipmap: MipmapOptions) -> Self {
+        Self { mipmap, ..self }
     }
 
     pub fn with_mag_min_filter(self, mag: wgpu::FilterMode, min: wgpu::FilterMode) -> Self {
@@ -135,8 +150,7 @@ impl Default for TextureOptions {
             address_mode: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap: MipmapOptions::None,
-            anisotropy: 1,
+            mipmap: MipmapOptions::default(),
         }
     }
 }
@@ -186,8 +200,6 @@ impl Texture {
             min_filter: options.min_filter,
             mipmap_filter: options.mipmap.filter(),
             compare: Some(wgpu::CompareFunction::LessEqual),
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
             ..Default::default()
         });
 
@@ -283,15 +295,13 @@ impl Texture {
 
         let (mut data, bytes_per_pixel) = Self::from_image_to_bytes(image, options.format)?;
 
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
-            size,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: options.mipmap.levels(),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -345,7 +355,7 @@ impl Texture {
             mag_filter: options.mag_filter,
             min_filter: options.min_filter,
             mipmap_filter: options.mipmap.filter(),
-            anisotropy_clamp: options.anisotropy,
+            anisotropy_clamp: options.mipmap.anisotropy(),
             ..Default::default()
         });
 
