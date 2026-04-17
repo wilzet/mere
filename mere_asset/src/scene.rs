@@ -50,10 +50,10 @@ impl Scene {
         }
     }
 
-    pub fn add_camera(&mut self, camera: Camera) -> anyhow::Result<usize> {
+    pub fn add_camera(&mut self, camera: Camera) -> usize {
         let id = self.cameras.len();
         self.cameras.push(camera);
-        Ok(id)
+        id
     }
 
     pub fn load_gltf(
@@ -123,6 +123,18 @@ impl Scene {
 
     pub fn objects(&self) -> impl Iterator<Item = &SceneObject> {
         self.objects.values()
+    }
+
+    pub fn cameras(&self) -> impl Iterator<Item = &Camera> {
+        self.cameras.iter()
+    }
+
+    pub fn main_camera(&self) -> &Camera {
+        &self.cameras[0]
+    }
+
+    pub fn main_camera_mut(&mut self) -> &mut Camera {
+        &mut self.cameras[0]
     }
 
     pub fn get_object(&self, handle: SceneObjectHandle) -> Option<&SceneObject> {

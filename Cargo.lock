@@ -1745,7 +1745,20 @@ name = "mere"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mere_app",
+]
+
+[[package]]
+name = "mere_app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "mere_log",
  "mere_render",
+ "pollster",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
@@ -1805,12 +1818,10 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "env_logger",
  "mere_asset",
  "mere_log",
  "mere_math",
  "mere_mesh",
- "pollster",
  "wgpu",
  "winit",
 ]

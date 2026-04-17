@@ -1,0 +1,13 @@
+[package]
+name = "mere_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+env_logger = "0.11.10"
+mere_log = { version = "0.1.0", path = "../mere_log" }
+mere_render = { version = "0.1.0", path = "../mere_render" }
+pollster = "0.4.0"
+wgpu.workspace = true
+winit = "0.30.13"

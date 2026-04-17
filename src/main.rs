@@ -1,5 +1,5 @@
 fn main() -> anyhow::Result<()> {
-    mere_render::run()?;
+    mere_app::run()?;
 
     Ok(())
 }

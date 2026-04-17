@@ -4,15 +4,24 @@ use egui_winit::State;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+mod debug;
+
+pub use debug::DebugWindow;
+
 pub struct EguiRenderer {
     state: State,
     renderer: Renderer,
     frame_started: bool,
+    scale_factor: f32,
 }
 
 impl EguiRenderer {
     pub fn context(&self) -> &Context {
         self.state.egui_ctx()
+    }
+
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     pub fn new(
@@ -47,6 +56,7 @@ impl EguiRenderer {
             state: egui_state,
             renderer: egui_renderer,
             frame_started: false,
+            scale_factor: 1.0,
         }
     }
 

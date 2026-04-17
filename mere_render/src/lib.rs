@@ -1,6 +1,6 @@
 use crate::{
     camera::{CameraController, CameraUniform},
-    egui_render::EguiRenderer,
+    egui_render::{DebugWindow, EguiRenderer},
     instance::InstanceRaw,
     lights::LightUniform,
     model::{DrawItem, DrawLight, DrawModel},
@@ -9,18 +9,9 @@ use crate::{
 use mere_asset::{Camera, Material, Scene, Texture};
 use mere_math::{Quat, Vec3};
 use mere_mesh::Vertex;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 use wgpu::util::DeviceExt;
-use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 mod camera;
 mod egui_render;
@@ -30,19 +21,17 @@ mod model;
 mod renderer;
 
 pub struct State {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    egui_renderer: EguiRenderer,
-    scale_factor: f32,
+    pub surface: wgpu::Surface<'static>,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
+    pub egui_renderer: EguiRenderer,
     is_surface_configured: bool,
     opaque_render_pipeline: wgpu::RenderPipeline,
     alpha_render_pipeline: wgpu::RenderPipeline,
     light_pipeline: wgpu::RenderPipeline,
-    window: Arc<Window>,
+    pub window: Arc<Window>,
     lock_cursor: bool,
-    camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -144,6 +133,7 @@ impl State {
             Vec3::new(5.0, 5.0, -5.0),
         );
         camera.look_at(scene.get_object(teapot).unwrap().transform.translation);
+        scene.add_camera(camera);
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
@@ -282,14 +272,12 @@ impl State {
             queue,
             config,
             egui_renderer,
-            scale_factor: 1.0,
             is_surface_configured: false,
             opaque_render_pipeline,
             alpha_render_pipeline,
             light_pipeline,
             window,
             lock_cursor: false,
-            camera,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -316,7 +304,9 @@ impl State {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
 
-            self.camera.resize(width as f32 / height as f32);
+            self.scene
+                .main_camera_mut()
+                .resize(width as f32 / height as f32);
 
             self.depth_texture =
                 Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
@@ -399,8 +389,10 @@ impl State {
         let dt = delta_time.as_secs_f32();
 
         self.scene.process_asset_event();
-        self.camera_controller.update_camera(&mut self.camera, dt);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_controller
+            .update_camera(self.scene.main_camera_mut(), dt);
+        self.camera_uniform
+            .update_view_proj(&self.scene.main_camera());
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -531,50 +523,14 @@ impl State {
 
         {
             self.egui_renderer.begin_frame(&self.window);
-            let (width, height): (f64, f64) = self.window.inner_size().into();
 
-            egui::Window::new(format!("Debug {width}x{height}"))
-                .resizable(true)
-                .vscroll(true)
-                .default_open(true)
-                .show(self.egui_renderer.context(), |ui| {
-                    let frame_time = delta_time.as_secs_f32();
-                    let fps = (1.0 / frame_time) as u32;
-                    ui.label(format!("{:.01} ms / {:>4} fps", frame_time * 1000.0, fps));
-
-                    if ui.button("Positions!").clicked() {
-                        for object in self.scene.objects() {
-                            println!(
-                                "{} {:?}",
-                                object.transform.translation,
-                                object.transform.rotation.to_euler(Default::default())
-                            );
-                        }
-                        println!(
-                            "{} {:?}",
-                            self.camera.transform.translation,
-                            self.camera.transform.rotation.to_euler(Default::default())
-                        );
-                    }
-
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "Pixels per point: {}",
-                            self.egui_renderer.context().pixels_per_point()
-                        ));
-                        if ui.button("-").clicked() {
-                            self.scale_factor = (self.scale_factor - 0.1).max(0.3);
-                        }
-                        if ui.button("+").clicked() {
-                            self.scale_factor = (self.scale_factor + 0.1).min(3.0);
-                        }
-                    });
-                });
+            self.egui_renderer
+                .debug_window(&self.window, &self.scene, delta_time);
 
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: self.window.scale_factor() as f32 * self.scale_factor,
+                pixels_per_point: self.window.scale_factor() as f32
+                    * self.egui_renderer.scale_factor(),
             };
 
             self.egui_renderer.end_frame_and_draw(
@@ -592,101 +548,4 @@ impl State {
 
         Ok(())
     }
-}
-
-pub struct App {
-    state: Option<State>,
-    last_frame_time: Instant,
-}
-
-impl App {
-    pub fn new() -> Self {
-        Self {
-            state: None,
-            last_frame_time: Instant::now(),
-        }
-    }
-}
-
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window_attributes = Window::default_attributes().with_title("MeRe");
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-
-        self.state = match pollster::block_on(State::new(window)) {
-            Ok(state) => Some(state),
-            Err(err) => {
-                mere_log::error!("{err}");
-                event_loop.exit();
-                None
-            }
-        };
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        event: WindowEvent,
-    ) {
-        let state = match &mut self.state {
-            Some(canvas) => canvas,
-            None => return,
-        };
-
-        let ui_input = state.egui_renderer.handle_input(&state.window, &event);
-
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => state.resize(size.width, size.height),
-            WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let dt = now - self.last_frame_time;
-                self.last_frame_time = now;
-                state.update(dt);
-                if let Err(err) = state.render(dt) {
-                    mere_log::error!("{err}");
-                    event_loop.exit();
-                }
-                state.window.request_redraw();
-            }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(code),
-                        state: key_state,
-                        ..
-                    },
-                ..
-            } => state.handle_key(event_loop, code, key_state.is_pressed()),
-            WindowEvent::CursorMoved { position, .. } => {
-                state.handle_mouse_moved(position.x, position.y)
-            }
-            WindowEvent::MouseInput {
-                state: key_state,
-                button,
-                ..
-            } if !ui_input => state.handle_mouse_input(button, key_state.is_pressed()),
-            WindowEvent::MouseWheel { delta, .. } => state.handle_mouse_scroll(delta),
-            _ => (),
-        }
-    }
-
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        mere_log::info!("Shutting down...")
-    }
-}
-
-pub fn run() -> anyhow::Result<()> {
-    env_logger::init();
-
-    let event_loop = EventLoop::builder().build()?;
-    let mut app = App::new();
-
-    match event_loop.run_app(&mut app) {
-        Ok(_) => (),
-        Err(err) => mere_log::error!(return err),
-    }
-
-    Ok(())
 }
