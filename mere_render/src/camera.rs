@@ -4,7 +4,7 @@ use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-pub(crate) struct CameraUniform {
+pub struct CameraUniform {
     view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }

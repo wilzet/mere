@@ -1,14 +1,12 @@
 use crate::{
-    camera::{CameraController, CameraUniform},
+    camera::CameraController,
     egui_render::{DebugWindow, EguiRenderer},
     instance::InstanceRaw,
-    lights::LightUniform,
-    model::{DrawItem, DrawLight, DrawModel},
-    renderer::create_render_pipeline,
+    model::DrawItem,
+    renderer::Renderer,
 };
-use mere_asset::{Camera, Material, Scene, Texture};
-use mere_math::{Quat, Vec3};
-use mere_mesh::Vertex;
+use mere_asset::{Camera, Material, Scene};
+use mere_math::Vec3;
 use std::{sync::Arc, time::Duration};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -23,98 +21,31 @@ mod egui_render;
 mod instance;
 mod lights;
 mod model;
+mod pipeline;
 mod renderer;
 
 pub struct State {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    mere_renderer: Renderer,
     egui_renderer: EguiRenderer,
-    is_surface_configured: bool,
-    opaque_render_pipeline: wgpu::RenderPipeline,
-    alpha_render_pipeline: wgpu::RenderPipeline,
-    light_pipeline: wgpu::RenderPipeline,
     window: Arc<Window>,
     lock_cursor: bool,
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
-    depth_texture: Texture,
-    bg_color: wgpu::Color,
-    light_uniform: LightUniform,
-    light_buffer: wgpu::Buffer,
-    light_bind_group: wgpu::BindGroup,
-    instance_buffer: wgpu::Buffer,
     scene: Scene,
+    instance_buffer: wgpu::Buffer,
 }
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let size = window.inner_size();
-        mere_log::info!("Initializing WGPU ({}x{})", size.width, size.height);
+        let mere_renderer = Renderer::new(window.clone()).await?;
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: Default::default(),
-            memory_budget_thresholds: Default::default(),
-            backend_options: Default::default(),
-            display: None,
-        });
+        let (device, queue) = mere_renderer.get_device_queue();
+        let config = mere_renderer.get_config();
 
-        let surface = instance.create_surface(window.clone()).unwrap();
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
-            })
-            .await?;
-
-        let info = adapter.get_info();
-        mere_log::success!("Selected adapter: {} ({:?})", info.name, info.backend);
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("Rendering device"),
-                required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: Default::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .await?;
-
-        let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or_else(|| {
-                let format = surface_caps.formats[0];
-                mere_log::warn!("sRGB format not found, falling back to {format:?}");
-                format
-            });
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::AutoNoVsync,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-        };
-
-        let mut scene = Scene::new(&device, &queue);
-        scene.load_gltf("sponza/main_sponza", &device, &queue)?;
-        scene.load_gltf("sponza/pkg_a_curtains", &device, &queue)?;
-        let teapot = scene.load_gltf("utah_teapot", &device, &queue)?[0];
+        let mut scene = Scene::new(device, queue);
+        scene.load_gltf("sponza/main_sponza", device, queue)?;
+        scene.load_gltf("sponza/pkg_a_curtains", device, queue)?;
+        let teapot = scene.load_gltf("utah_teapot", device, queue)?[0];
         scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
 
         let instances = scene
@@ -128,8 +59,6 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let camera_controller = CameraController::new(5.0, 0.002);
-
         let mut camera = Camera::new(
             45.0f32.to_radians(),
             config.width as f32 / config.height as f32,
@@ -140,183 +69,31 @@ impl State {
         camera.look_at(scene.get_object(teapot).unwrap().transform.translation);
         scene.add_camera(camera);
 
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("camera_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera_bind_group"),
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
-
-        let light_uniform = LightUniform {
-            position: [1.5, 2.0, 1.5],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
-
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-        });
-
-        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
-
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    Some(&camera_bind_group_layout),
-                    Some(&light_bind_group_layout),
-                    Some(Material::material_bind_group_layout(&device)),
-                ],
-                immediate_size: 0,
-            });
-        let forward_main_shader = wgpu::include_wgsl!("shader.wgsl");
-
-        let opaque_render_pipeline = create_render_pipeline(
-            &device,
-            &render_pipeline_layout,
-            config.format,
-            Some(Texture::DEPTH_FORMAT),
-            &[Vertex::desc(), InstanceRaw::desc()],
-            Some(wgpu::BlendState::REPLACE),
-            forward_main_shader.clone(),
-        );
-
-        let alpha_render_pipeline = create_render_pipeline(
-            &device,
-            &render_pipeline_layout,
-            config.format,
-            Some(Texture::DEPTH_FORMAT),
-            &[Vertex::desc(), InstanceRaw::desc()],
-            Some(wgpu::BlendState::ALPHA_BLENDING),
-            forward_main_shader,
-        );
-
-        let light_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Pipeline Layout"),
-                bind_group_layouts: &[
-                    Some(&camera_bind_group_layout),
-                    Some(&light_bind_group_layout),
-                ],
-                immediate_size: 0,
-            });
-
-            let shader = wgpu::include_wgsl!("light.wgsl");
-
-            create_render_pipeline(
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[Vertex::desc()],
-                Some(wgpu::BlendState::REPLACE),
-                shader,
-            )
-        };
+        let camera_controller = CameraController::new(5.0, 0.002);
 
         let egui_renderer = EguiRenderer::new(&device, config.format, None, 1, &window);
 
         mere_log::success!("State initialization complete.");
 
         Ok(Self {
-            surface,
-            device,
-            queue,
-            config,
+            mere_renderer,
             egui_renderer,
-            is_surface_configured: false,
-            opaque_render_pipeline,
-            alpha_render_pipeline,
-            light_pipeline,
             window,
             lock_cursor: false,
-            camera_uniform,
-            camera_buffer,
-            camera_bind_group,
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
-            depth_texture,
-            bg_color: wgpu::Color {
-                r: 0.1,
-                g: 0.2,
-                b: 0.3,
-                a: 1.0,
-            },
-            light_uniform,
-            light_buffer,
-            light_bind_group,
-            instance_buffer,
             scene,
+            instance_buffer,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.config.width = width;
-            self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
+            self.mere_renderer.resize(width, height);
 
             self.scene
                 .main_camera_mut()
                 .resize(width as f32 / height as f32);
-
-            self.depth_texture =
-                Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
-
-            self.is_surface_configured = true;
         }
     }
 
@@ -365,12 +142,12 @@ impl State {
         if !self.lock_cursor {
             let r = (x / width).clamp(0.0, 1.0);
             let g = (y / height).clamp(0.0, 1.0);
-            self.bg_color = wgpu::Color {
+            self.mere_renderer.set_bg_color(wgpu::Color {
                 r,
                 g,
                 b: 0.3,
                 a: 1.0,
-            };
+            });
 
             self.stored_cursor_pos = (x, y);
             return;
@@ -424,30 +201,19 @@ impl State {
         let dt = delta_time.as_secs_f32();
 
         self.scene.process_asset_event();
+
         self.camera_controller
             .update_camera(self.scene.main_camera_mut(), dt);
-        self.camera_uniform
-            .update_view_proj(&self.scene.main_camera());
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
-
-        let old_position = Vec3::from(self.light_uniform.position);
-        self.light_uniform.position =
-            (Quat::from_axis_angle(Vec3::Y, dt * 36.0f32.to_radians()) * old_position).into();
-        self.queue.write_buffer(
-            &self.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.light_uniform]),
-        );
+        self.mere_renderer
+            .update_main_camera(self.scene.main_camera());
+        self.mere_renderer.update_light(dt);
     }
 
     pub fn render(&mut self, delta_time: Duration) -> anyhow::Result<()> {
-        if !self.is_surface_configured {
-            return Ok(());
-        }
+        let (output, view, mut encoder) = match self.mere_renderer.create_encoder()? {
+            Some(res) => res,
+            None => return Ok(()),
+        };
 
         let default_lock = self.scene.get_material(Material::DEFAULT_MATERIAL_ID);
         let default_material = default_lock.read();
@@ -480,81 +246,16 @@ impl State {
             }
         }
 
-        let output = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
-            wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => {
-                self.surface.configure(&self.device, &self.config);
-                surface_texture
-            }
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return Ok(()),
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.config);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Lost => anyhow::bail!("device lost"),
-        };
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let (device, queue) = self.mere_renderer.get_device_queue();
+        let config = self.mere_renderer.get_config();
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.bg_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                occlusion_query_set: None,
-                timestamp_writes: None,
-                multiview_mask: None,
-            });
-
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-
-            render_pass.set_pipeline(&self.light_pipeline);
-            if let Some(mesh) = opaque_draw_items.get(26) {
-                render_pass.draw_light_mesh(
-                    mesh.clone(),
-                    &self.camera_bind_group,
-                    &self.light_bind_group,
-                );
-            }
-
-            render_pass.set_pipeline(&self.opaque_render_pipeline);
-            render_pass.draw_meshes(
-                opaque_draw_items,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
-
-            render_pass.set_pipeline(&self.alpha_render_pipeline);
-            render_pass.draw_meshes(
-                alpha_draw_items,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
-        }
+        self.mere_renderer.render(
+            &view,
+            &mut encoder,
+            &self.instance_buffer,
+            opaque_draw_items,
+            alpha_draw_items,
+        );
 
         {
             self.egui_renderer.begin_frame(&self.window);
@@ -563,14 +264,14 @@ impl State {
                 .debug_window(&self.window, &self.scene, delta_time);
 
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [self.config.width, self.config.height],
+                size_in_pixels: [config.width, config.height],
                 pixels_per_point: self.window.scale_factor() as f32
                     * self.egui_renderer.scale_factor(),
             };
 
             self.egui_renderer.end_frame_and_draw(
-                &self.device,
-                &self.queue,
+                device,
+                queue,
                 &mut encoder,
                 &self.window,
                 &view,
@@ -578,7 +279,7 @@ impl State {
             );
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
         output.present();
 
         Ok(())

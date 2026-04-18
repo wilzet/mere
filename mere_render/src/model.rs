@@ -24,6 +24,7 @@ pub trait DrawLight<'a> {
         light_bind_group: &'a wgpu::BindGroup,
     );
 
+    #[allow(unused)]
     fn draw_light_meshes(
         &mut self,
         meshes: Vec<DrawItem>,
