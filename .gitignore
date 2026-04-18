@@ -1,2 +1,6 @@
+# Build
 /target
 /assets/mere_processed
+
+# Editor
+.VSCodeCounter/
