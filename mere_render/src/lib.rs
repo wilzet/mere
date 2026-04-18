@@ -11,7 +11,12 @@ use mere_math::{Quat, Vec3};
 use mere_mesh::Vertex;
 use std::{sync::Arc, time::Duration};
 use wgpu::util::DeviceExt;
-use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
+use winit::{
+    event::*,
+    event_loop::ActiveEventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
+};
 
 mod camera;
 mod egui_render;
@@ -21,16 +26,16 @@ mod model;
 mod renderer;
 
 pub struct State {
-    pub surface: wgpu::Surface<'static>,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub config: wgpu::SurfaceConfiguration,
-    pub egui_renderer: EguiRenderer,
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    egui_renderer: EguiRenderer,
     is_surface_configured: bool,
     opaque_render_pipeline: wgpu::RenderPipeline,
     alpha_render_pipeline: wgpu::RenderPipeline,
     light_pipeline: wgpu::RenderPipeline,
-    pub window: Arc<Window>,
+    window: Arc<Window>,
     lock_cursor: bool,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -315,7 +320,37 @@ impl State {
         }
     }
 
-    pub fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+    pub fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
+
+    pub fn handle_input(&mut self, event_loop: &ActiveEventLoop, event: &WindowEvent) {
+        let ui_input = self.egui_renderer.handle_input(&self.window, &event);
+
+        match *event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state: key_state,
+                        ..
+                    },
+                ..
+            } => self.handle_key(event_loop, code, key_state.is_pressed()),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.handle_mouse_moved(position.x, position.y)
+            }
+            WindowEvent::MouseInput {
+                state: key_state,
+                button,
+                ..
+            } if !ui_input => self.handle_mouse_input(button, key_state.is_pressed()),
+            WindowEvent::MouseWheel { delta, .. } if !ui_input => self.handle_mouse_scroll(delta),
+            _ => (),
+        }
+    }
+
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         match (code, is_pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
             _ => {
@@ -324,7 +359,7 @@ impl State {
         }
     }
 
-    pub fn handle_mouse_moved(&mut self, x: f64, y: f64) {
+    fn handle_mouse_moved(&mut self, x: f64, y: f64) {
         let (width, height): (f64, f64) = self.window.inner_size().into();
 
         if !self.lock_cursor {
@@ -357,7 +392,7 @@ impl State {
             .set_cursor_position(winit::dpi::PhysicalPosition::new(center_x, center_y));
     }
 
-    pub fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
+    fn handle_mouse_input(&mut self, button: MouseButton, is_pressed: bool) {
         if let MouseButton::Left = button {
             self.lock_cursor = is_pressed;
             self.window.set_cursor_visible(!is_pressed);
@@ -381,7 +416,7 @@ impl State {
         }
     }
 
-    pub fn handle_mouse_scroll(&mut self, delta: MouseScrollDelta) {
+    fn handle_mouse_scroll(&mut self, delta: MouseScrollDelta) {
         self.camera_controller.handle_mouse_scroll(&delta)
     }
 
