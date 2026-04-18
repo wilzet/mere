@@ -1,5 +1,5 @@
 use anyhow::Context;
-use common::collect_gltf_files;
+use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh::{MereMesh, write_mere_file};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};

@@ -4,9 +4,9 @@ use crate::{
     handle::{ResourceHandle, UntypedHandle},
     texture::{Texture, TextureOptions},
 };
-use common::collect_gltf_files;
 use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
+use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh::{MereMesh, read_mere_file};
 use std::path;

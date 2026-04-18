@@ -14,7 +14,7 @@ resolver = "3"
 members = [
     "mere_app",
     "mere_asset",
-    "mere_asset/common",
+    "mere_asset/mere_asset_common",
     "mere_common",
     "mere_log",
     "mere_math",
