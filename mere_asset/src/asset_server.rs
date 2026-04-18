@@ -1,25 +1,26 @@
 use crate::{
-    Material, Model, Texture,
     asset::Asset,
     handle::{ResourceHandle, UntypedHandle},
-    texture,
+    material::Material,
+    model::Model,
+    texture::{Texture, TextureOptions},
 };
 use crossbeam::channel::{Receiver, Sender, unbounded};
 use parking_lot::RwLock;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 
-pub(crate) type Atomic<T> = Arc<RwLock<T>>;
-type AtomicMap<K, V> = Atomic<HashMap<K, V>>;
-type ResourceMap<R> = AtomicMap<ResourceHandle<R>, AssetState<R>>;
+pub type Shared<T> = Arc<RwLock<T>>;
+type SharedMap<K, V> = Shared<HashMap<K, V>>;
+type ResourceMap<R> = SharedMap<ResourceHandle<R>, AssetState<R>>;
 
 #[derive(Clone, Debug)]
-pub enum AssetState<R> {
+enum AssetState<R> {
     Loading,
-    Ready(Atomic<R>),
+    Ready(Shared<R>),
 }
 
 impl<R> AssetState<R> {
-    pub fn new(has_resource: Option<R>) -> Self {
+    fn new(has_resource: Option<R>) -> Self {
         match has_resource {
             Some(value) => Self::Ready(RwLock::new(value).into()),
             None => Self::Loading,
@@ -33,12 +34,12 @@ pub enum AssetEvent {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AssetServer {
-    pub device: wgpu::Device,
+pub struct AssetServer {
+    device: wgpu::Device,
     models: ResourceMap<Model>,
     textures: ResourceMap<Texture>,
     materials: ResourceMap<Material>,
-    dependency_listeners: AtomicMap<UntypedHandle, Vec<UntypedHandle>>,
+    dependency_listeners: SharedMap<UntypedHandle, Vec<UntypedHandle>>,
     event_tx: Sender<AssetEvent>,
     event_rx: Receiver<AssetEvent>,
 }
@@ -55,7 +56,7 @@ impl AssetServer {
                     2,
                     color.to_vec(),
                     label,
-                    texture::TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+                    TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
                         .with_mag_min_filter(wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest),
                 ) {
                     Ok(tex) => tex,
@@ -107,8 +108,6 @@ impl AssetServer {
                 self.finish_untyped(listener);
             }
         }
-
-        self.finish_untyped(handle);
     }
 
     fn finish_untyped(&self, handle: UntypedHandle) {
@@ -126,17 +125,21 @@ impl AssetServer {
     pub fn try_recv(&self) -> anyhow::Result<AssetEvent> {
         Ok(self.event_rx.try_recv()?)
     }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
 }
 
 pub trait Resource<R: Asset> {
-    fn get(&self, handle: ResourceHandle<R>) -> Option<Atomic<R>>;
+    fn get(&self, handle: ResourceHandle<R>) -> Option<Shared<R>>;
     fn add(&mut self, value: R) -> ResourceHandle<R>;
     fn reserve_handle(&self, handle: ResourceHandle<R>);
     fn finish(&self, handle: ResourceHandle<R>);
 }
 
 pub trait DefaultResource<R: Asset>: Resource<R> {
-    fn get_with_default(&self, handle: ResourceHandle<R>, default: ResourceHandle<R>) -> Atomic<R> {
+    fn get_with_default(&self, handle: ResourceHandle<R>, default: ResourceHandle<R>) -> Shared<R> {
         match self.get(handle) {
             Some(value) => value,
             None => self.get(default).unwrap(),
@@ -147,7 +150,7 @@ pub trait DefaultResource<R: Asset>: Resource<R> {
 macro_rules! resource_impl {
     ($resource:ty, $storage:ident, $ident:ident) => {
         impl Resource<$resource> for AssetServer {
-            fn get(&self, handle: ResourceHandle<$resource>) -> Option<Atomic<$resource>> {
+            fn get(&self, handle: ResourceHandle<$resource>) -> Option<Shared<$resource>> {
                 match self.$storage.read().get(&handle) {
                     Some(AssetState::Ready(value)) => Some(value.clone()),
                     _ => None,
@@ -155,7 +158,7 @@ macro_rules! resource_impl {
             }
 
             fn add(&mut self, value: $resource) -> ResourceHandle<$resource> {
-                let id = ResourceHandle::from(value.$ident());
+                let id = ResourceHandle::from(value.$ident.as_str());
                 {
                     if let Some(AssetState::Ready(_)) = self.$storage.read().get(&id) {
                         return id;

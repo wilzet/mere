@@ -1,6 +1,6 @@
 use crate::{
-    asset::{Asset, GltfAsset, load_gltf_asset, load_mere_asset},
-    asset_server::{AssetEvent, AssetServer, Atomic, DefaultResource, Resource},
+    asset::{Asset, GltfAsset, load_gltf_asset, load_mere_meshes},
+    asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
     camera::Camera,
     handle::ResourceHandle,
     material::Material,
@@ -15,15 +15,15 @@ use std::path;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SceneObject {
-    model_handle: ResourceHandle<Model>,
     pub transform: Transform,
+    model_handle: ResourceHandle<Model>,
 }
 
 impl SceneObject {
     pub fn new(handle: ResourceHandle<Model>, transform: Transform) -> Self {
         Self {
-            model_handle: handle,
             transform,
+            model_handle: handle,
         }
     }
 
@@ -63,13 +63,12 @@ impl Scene {
         queue: &wgpu::Queue,
     ) -> anyhow::Result<Vec<SceneObjectHandle>> {
         let gltf_asset = load_gltf_asset(path)?;
-        let doc = gltf_asset.document();
 
         let asset_server_inner = self.asset_server.clone();
         let device = device.clone();
         let queue = queue.clone();
 
-        let object_handles = doc
+        let object_handles = gltf_asset
             .nodes()
             .filter_map(|node| {
                 let model = node.mesh()?;
@@ -106,9 +105,7 @@ impl Scene {
     pub fn process_asset_event(&mut self) {
         while let Ok(event) = self.asset_server.try_recv() {
             match event {
-                AssetEvent::Ready(handle) => {
-                    self.asset_server.dispatch_ready(handle);
-                }
+                AssetEvent::Ready(handle) => self.asset_server.dispatch_ready(handle),
             }
         }
     }
@@ -121,11 +118,11 @@ impl Scene {
         self.objects.remove(handle);
     }
 
-    pub fn objects(&self) -> impl Iterator<Item = &SceneObject> {
+    pub fn objects(&self) -> slotmap::dense::Values<'_, SceneObjectHandle, SceneObject> {
         self.objects.values()
     }
 
-    pub fn cameras(&self) -> impl Iterator<Item = &Camera> {
+    pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
         self.cameras.iter()
     }
 
@@ -145,11 +142,11 @@ impl Scene {
         self.objects.get_mut(handle)
     }
 
-    pub fn get_model(&self, id: ResourceHandle<Model>) -> Option<Atomic<Model>> {
+    pub fn get_model(&self, id: ResourceHandle<Model>) -> Option<Shared<Model>> {
         self.asset_server.get(id)
     }
 
-    pub fn get_material(&self, id: ResourceHandle<Material>) -> Atomic<Material> {
+    pub fn get_material(&self, id: ResourceHandle<Material>) -> Shared<Material> {
         self.asset_server
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
@@ -157,16 +154,15 @@ impl Scene {
 
 fn background_load_task(
     path: &str,
-    gltf: GltfAsset,
+    gltf_asset: GltfAsset,
     device: wgpu::Device,
     queue: wgpu::Queue,
     mut asset_server: AssetServer,
 ) -> anyhow::Result<()> {
-    let mere_asset = load_mere_asset(&path)?;
-    let mut meshes_iter = mere_asset.meshes();
+    let mut mere_meshes = load_mere_meshes(&path)?.into_iter();
 
-    for model in gltf.document().meshes() {
-        let meshes = meshes_iter
+    for model in gltf_asset.models() {
+        let meshes = mere_meshes
             .by_ref()
             .take(model.primitives().len())
             .collect();
@@ -175,14 +171,12 @@ fn background_load_task(
         asset_server.add(model);
     }
 
-    for material in gltf.materials() {
-        let material = Material::load((path, material, &device, &asset_server))?;
-
-        asset_server.add(material);
+    for material in gltf_asset.materials() {
+        asset_server.add(Material::load((path, material, &device, &asset_server))?);
     }
 
     const DEFAULT_IMAGE_LOAD_MIP: u32 = 1;
-    gltf.images().par_iter().for_each(|image| {
+    gltf_asset.images().par_iter().for_each(|image| {
         let uri = match image.source() {
             gltf::image::Source::Uri { uri, .. } => uri,
             gltf::image::Source::View { .. } => {

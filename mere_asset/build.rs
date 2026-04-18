@@ -1,3 +1,10 @@
+//! Asset build script.
+//!
+//! Converts source assets (GLTF) into `.mere` files.
+//! Skips unchanged assets using content hashing.
+//!
+//! Runs in release or when `BUILD_ASSETS=1` is set.
+
 use anyhow::Context;
 use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
@@ -22,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let out_dir = Path::new(PROCESSED_ASSET_DIR);
-    if let Err(err) = fs::create_dir_all(&out_dir) {
+    if let Err(err) = fs::create_dir_all(out_dir) {
         mere_log::error!(return err);
     }
 
@@ -117,7 +124,7 @@ fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
     let time = start.elapsed();
 
     mere_log::success!(
-        "Processed {} mesh(es) in {:?} ({:.3} ms)",
+        "Processed {} mesh(es) from {:?} ({:.3} ms)",
         meshes.len(),
         path.file_name().unwrap(),
         time.as_secs_f32() * 1000.0,

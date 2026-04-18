@@ -32,6 +32,7 @@ pub struct Material {
 static MATERIAL_BIND_GROUP: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
 
 impl Material {
+    /// Handle for the default material.
     pub const DEFAULT_MATERIAL_ID: ResourceHandle<Self> = ResourceHandle::new(0);
     pub(crate) const DEFAULT_MATERIAL_NAME: &str = "mere_default_material";
 
@@ -189,16 +190,14 @@ impl Material {
         self.bind_group = Some(bind_group);
     }
 
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
+    /// Returns the shared material bind group layout.
     pub fn material_bind_group_layout(device: &wgpu::Device) -> &wgpu::BindGroupLayout {
         MATERIAL_BIND_GROUP.get_or_init(|| device.create_bind_group_layout(&Self::desc()))
     }
 
     const fn desc() -> wgpu::BindGroupLayoutDescriptor<'static> {
         wgpu::BindGroupLayoutDescriptor {
+            label: Some("material_bind_group_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -259,7 +258,6 @@ impl Material {
                     count: None,
                 },
             ],
-            label: Some("material_bind_group_layout"),
         }
     }
 }

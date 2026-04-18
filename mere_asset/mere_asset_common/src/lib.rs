@@ -3,6 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Recursively collects `.gltf` files under a path.
+///
+/// Returns [`None`] if no `.gltf` files are found.
+///
+/// # Panics
+/// If reading a directory fails.
 pub fn collect_gltf_files(path: &Path) -> Option<Vec<PathBuf>> {
     if path.is_dir() {
         let mut files = Vec::new();

@@ -4,9 +4,12 @@ use std::num::NonZero;
 
 #[derive(Clone, Copy, Default, Debug)]
 pub enum MipmapLevels {
+    /// No mipmaps
     #[default]
     None,
+    /// Derive mip levels from texture
     Auto,
+    /// Specify mip levels
     Levels(NonZero<u32>),
 }
 
@@ -18,6 +21,7 @@ pub struct MipmapOptions {
 }
 
 impl MipmapOptions {
+    /// Upper bound for automatic mip level generation.
     const MIPMAP_LEVEL_BOUND: u32 = 32;
 
     pub fn new(
@@ -157,7 +161,7 @@ impl Default for TextureOptions {
 
 #[derive(Clone, Debug)]
 pub struct Texture {
-    label: String,
+    pub label: String,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
@@ -378,10 +382,6 @@ impl Texture {
             binding,
             resource: wgpu::BindingResource::Sampler(&self.sampler),
         }
-    }
-
-    pub fn label(&self) -> &str {
-        &self.label
     }
 }
 

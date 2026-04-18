@@ -52,7 +52,7 @@ where
         self.set_bind_group(0, camera_bind_group, &[]);
         self.set_bind_group(1, light_bind_group, &[]);
         self.set_bind_group(2, material, &[]);
-        self.draw_indexed(0..mesh.num_elements, 0, instance_index..instance_index + 1);
+        self.draw_indexed(0..mesh.index_count, 0, instance_index..instance_index + 1);
     }
 
     fn draw_meshes(
@@ -82,7 +82,7 @@ impl<'a, 'b> DrawLight<'b> for wgpu::RenderPass<'a> {
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.set_bind_group(0, camera_bind_group, &[]);
         self.set_bind_group(1, light_bind_group, &[]);
-        self.draw_indexed(0..mesh.num_elements, 0, instance_index..instance_index + 1);
+        self.draw_indexed(0..mesh.index_count, 0, instance_index..instance_index + 1);
     }
 
     fn draw_light_meshes(

@@ -27,7 +27,7 @@ impl DebugWindow for EguiRenderer {
                             let model = scene.get_model(object.handle()).unwrap();
                             ui.label(format!(
                                 "{}\n\tposition: {}\n\trotation: {:?}",
-                                model.read().name(),
+                                model.read().name,
                                 object.transform.translation,
                                 object.transform.rotation.to_euler(Default::default())
                             ));

@@ -1,3 +1,11 @@
+//! Asset types and scene representation.
+//!
+//! Provides core data structures used at runtime:
+//! - Models and meshes
+//! - Materials and textures
+//! - Scene and objects
+//! - Camera
+
 mod asset;
 mod asset_server;
 mod camera;
@@ -7,8 +15,10 @@ mod model;
 mod scene;
 mod texture;
 
-pub use camera::Camera;
-pub use material::Material;
-pub use model::{Mesh, Model};
-pub use scene::{Scene, SceneObject, SceneObjectHandle};
-pub use texture::Texture;
+pub use {
+    camera::Camera,
+    material::Material,
+    model::{Mesh, Model},
+    scene::{Scene, SceneObject, SceneObjectHandle},
+    texture::Texture,
+};

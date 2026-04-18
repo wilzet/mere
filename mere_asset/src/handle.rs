@@ -2,6 +2,7 @@ use std::{any::TypeId, hash::Hash, marker::PhantomData, ops::Deref};
 
 type ResourceHandleID = u64;
 
+/// Type-erased handle used for dependency tracking.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct UntypedHandle {
     id: ResourceHandleID,
@@ -31,6 +32,7 @@ impl<R: 'static> From<ResourceHandle<R>> for UntypedHandle {
     }
 }
 
+/// Strongly-typed handle to a resource.
 #[derive(Debug, Default)]
 pub struct ResourceHandle<R> {
     id: ResourceHandleID,

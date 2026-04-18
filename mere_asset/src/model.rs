@@ -12,15 +12,11 @@ impl Model {
     pub fn new(name: &str, meshes: Vec<Mesh>) -> Self {
         Self {
             name: name.to_string(),
-            meshes: meshes,
+            meshes,
         }
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+    pub fn meshes(&self) -> std::slice::Iter<'_, Mesh> {
         self.meshes.iter()
     }
 }
@@ -29,19 +25,19 @@ impl Model {
 pub struct Mesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
-    pub num_elements: u32,
+    pub index_count: u32,
     pub material: ResourceHandle<Material>,
 }
 
 impl Mesh {
-    pub fn from_mere_mesh(name: &str, mesh: MereMesh, device: &wgpu::Device) -> Self {
+    pub(crate) fn from_mere_mesh(name: &str, mesh: MereMesh, device: &wgpu::Device) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{}_vertex_buffer", name)),
+            label: Some(&format!("{name}_vertex_buffer")),
             contents: bytemuck::cast_slice(&mesh.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{}_index_buffer", name)),
+            label: Some(&format!("{name}_index_buffer")),
             contents: bytemuck::cast_slice(&mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
@@ -49,12 +45,12 @@ impl Mesh {
         Mesh {
             vertex_buffer,
             index_buffer,
-            num_elements: mesh.indices.len() as u32,
+            index_count: mesh.indices.len() as u32,
             material: ResourceHandle::from(Material::DEFAULT_MATERIAL_NAME),
         }
     }
 
-    pub fn with_material(self, material_handle: ResourceHandle<Material>) -> Self {
+    pub(crate) fn with_material(self, material_handle: ResourceHandle<Material>) -> Self {
         Self {
             material: material_handle,
             ..self
