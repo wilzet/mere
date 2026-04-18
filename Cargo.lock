@@ -550,13 +550,6 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "gltf",
- "half",
- "mere_math",
- "mere_mesh",
-]
 
 [[package]]
 name = "concurrent-queue"
@@ -1804,6 +1797,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "gltf",
+ "half",
  "mere_math",
  "meshopt",
  "wgpu",

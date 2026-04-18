@@ -1,5 +1,12 @@
-use std::os::raw::{c_uint, c_void};
+use crate::util::*;
+use mere_math::{Vec2, Vec3};
+use std::{
+    fs,
+    os::raw::{c_uint, c_void},
+    path::Path,
+};
 
+mod util;
 mod vertex;
 
 pub use vertex::Vertex;
@@ -100,4 +107,114 @@ impl MereMesh {
             i_end,
         ))
     }
+
+    pub fn from_gltf_primitive(
+        primitive: gltf::Primitive,
+        buffers: &Vec<gltf::buffer::Data>,
+    ) -> MereMesh {
+        let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+
+        let indices = reader
+            .read_indices()
+            .unwrap()
+            .into_u32()
+            .collect::<Vec<_>>();
+
+        let (positions, normals, tex_coords, tangents) = match reader.read_tangents() {
+            Some(tangents) => {
+                let positions = reader
+                    .read_positions()
+                    .unwrap()
+                    .map(Vec3::from)
+                    .collect::<Vec<_>>();
+                let normals = reader.read_normals().map_or_else(
+                    || vec![pack_11_11_10(Vec3::ZERO); positions.len()],
+                    |it| it.map(|n| pack_11_11_10(Vec3::from(n))).collect(),
+                );
+                let tex_coords = reader.read_tex_coords(0).map_or_else(
+                    || vec![pack_16_16(Vec2::ZERO); positions.len()],
+                    |it| it.into_f32().map(|t| pack_16_16(Vec2::from(t))).collect(),
+                );
+                let tangents = tangents
+                    .map(|t| {
+                        pack_10_10_10_2(
+                            Vec3::new(t[0], t[1], t[2]),
+                            ((t[3].signum() as i32 + 1) >> 1) as u32,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                (positions, normals, tex_coords, tangents)
+            }
+            None => {
+                let positions = reader
+                    .read_positions()
+                    .unwrap()
+                    .map(Vec3::from)
+                    .collect::<Vec<_>>();
+                let normals = reader.read_normals().map_or_else(
+                    || vec![Vec3::ZERO; positions.len()],
+                    |it| it.map(Vec3::from).collect(),
+                );
+                let tex_coords = reader.read_tex_coords(0).map_or_else(
+                    || vec![Vec2::ZERO; positions.len()],
+                    |it| it.into_f32().map(Vec2::from).collect(),
+                );
+                let tangents = calculate_tangents(&indices, &positions, &normals, &tex_coords);
+
+                let normals = normals.into_iter().map(pack_11_11_10).collect::<Vec<_>>();
+                let tex_coords = tex_coords.into_iter().map(pack_16_16).collect::<Vec<_>>();
+
+                (positions, normals, tex_coords, tangents)
+            }
+        };
+
+        let index_count = indices.len();
+        let vertices = indices.into_iter().map(|i| {
+            let index = i as usize;
+            Vertex {
+                position: positions[index],
+                normal: normals[index],
+                tex_coord: tex_coords[index],
+                tangent: tangents[index],
+            }
+        });
+
+        Self::new(vertices, index_count)
+    }
+}
+
+pub fn write_mere_file(output_path: &Path, meshes: Vec<MereMesh>) -> anyhow::Result<()> {
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mesh_count = meshes.len();
+    let mut bin = (mesh_count as u32).to_le_bytes().to_vec();
+    bin.extend_from_slice(
+        meshes
+            .iter()
+            .flat_map(|m| m.into_mere_file())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
+
+    fs::write(&output_path, bin)?;
+
+    Ok(())
+}
+
+pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MereMesh>> {
+    let mere_bytes = fs::read(&path)?;
+    let mesh_count = u32::from_le_bytes(mere_bytes[0..4].try_into()?) as usize;
+
+    let mut offset = 4;
+    let mut meshes = Vec::new();
+    for _ in 0..mesh_count {
+        let (mesh, read_bytes) = MereMesh::from_mere_file(&mere_bytes[offset..])?;
+        meshes.push(mesh);
+        offset += read_bytes;
+    }
+
+    Ok(meshes)
 }

@@ -107,20 +107,19 @@ impl AssetServer {
                 self.finish_untyped(listener);
             }
         }
+
+        self.finish_untyped(handle);
     }
 
-    pub fn finish_untyped(&self, handle: UntypedHandle) {
+    fn finish_untyped(&self, handle: UntypedHandle) {
         let type_id = handle.type_id();
 
         if type_id == TypeId::of::<Material>() {
-            let h = ResourceHandle::<Material>::new(*handle);
-            self.finish(h);
+            self.finish(ResourceHandle::<Material>::new(*handle));
         } else if type_id == TypeId::of::<Texture>() {
-            let h = ResourceHandle::<Texture>::new(*handle);
-            self.finish(h);
+            self.finish(ResourceHandle::<Texture>::new(*handle));
         } else if type_id == TypeId::of::<Model>() {
-            let h = ResourceHandle::<Model>::new(*handle);
-            self.finish(h);
+            self.finish(ResourceHandle::<Model>::new(*handle));
         }
     }
 

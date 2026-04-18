@@ -4,11 +4,11 @@ use crate::{
     handle::{ResourceHandle, UntypedHandle},
     texture::{Texture, TextureOptions},
 };
-use common::{collect_gltf_files, read_mere_file};
+use common::collect_gltf_files;
 use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_mesh::MereMesh;
+use mere_mesh::{MereMesh, read_mere_file};
 use std::path;
 
 pub(crate) trait Asset: Sized {
@@ -54,7 +54,7 @@ impl Asset for Texture {
         &'a wgpu::Device,
         &'a wgpu::Queue,
         TextureOptions,
-        u32
+        u32,
     );
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
@@ -66,13 +66,7 @@ impl Asset for Texture {
         };
 
         let image = load_image(path, mip_0)?;
-        Ok(Self::from_image(
-            device,
-            queue,
-            image,
-            label,
-            options,
-        )?)
+        Ok(Self::from_image(device, queue, image, label, options)?)
     }
 
     fn dependencies(&self) -> Vec<UntypedHandle> {
