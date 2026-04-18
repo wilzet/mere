@@ -1,7 +1,8 @@
 use glam::{Mat3, Mat4, Quat, Vec3};
 use std::ops::Mul;
 
-#[repr(C)]
+/// TRS transform in 3D space (translation, rotation, scale).
+/// Stored in engine-native form and convertible to [`Mat4`].
 #[derive(Clone, Copy, Debug)]
 pub struct Transform {
     pub translation: Vec3,
