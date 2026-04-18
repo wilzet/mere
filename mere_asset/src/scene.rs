@@ -1,27 +1,29 @@
 use crate::{
-    Camera,
-    asset::{AssetServer, GltfAsset, Resource, load_gltf_asset, load_mere_asset, load_texture},
+    asset::{Asset, GltfAsset, load_gltf_asset, load_mere_meshes},
+    asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
+    camera::Camera,
     handle::ResourceHandle,
     material::Material,
     model::Model,
+    texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use slotmap::DenseSlotMap;
-use std::{path, sync::Arc};
+use std::path;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SceneObject {
-    model_handle: ResourceHandle<Model>,
     pub transform: Transform,
+    model_handle: ResourceHandle<Model>,
 }
 
 impl SceneObject {
     pub fn new(handle: ResourceHandle<Model>, transform: Transform) -> Self {
         Self {
-            model_handle: handle,
             transform,
+            model_handle: handle,
         }
     }
 
@@ -48,28 +50,25 @@ impl Scene {
         }
     }
 
-    pub fn add_camera(&mut self, camera: Camera) -> anyhow::Result<usize> {
+    pub fn add_camera(&mut self, camera: Camera) -> usize {
         let id = self.cameras.len();
         self.cameras.push(camera);
-        Ok(id)
+        id
     }
 
-    pub fn add_gltf(
+    pub fn load_gltf(
         &mut self,
         path: &str,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        material_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> anyhow::Result<Vec<SceneObjectHandle>> {
         let gltf_asset = load_gltf_asset(path)?;
-        let doc = gltf_asset.document();
 
         let asset_server_inner = self.asset_server.clone();
         let device = device.clone();
         let queue = queue.clone();
-        let material_layout = material_bind_group_layout.clone();
 
-        let object_handles = doc
+        let object_handles = gltf_asset
             .nodes()
             .filter_map(|node| {
                 let model = node.mesh()?;
@@ -92,20 +91,23 @@ impl Scene {
 
         let path_string = path.to_string();
         std::thread::spawn(move || {
-            if let Err(err) = background_load_task(
-                &path_string,
-                gltf_asset,
-                device,
-                queue,
-                material_layout,
-                asset_server_inner,
-            ) {
+            if let Err(err) =
+                background_load_task(&path_string, gltf_asset, device, queue, asset_server_inner)
+            {
                 mere_log::error!("Async load failed for {path_string}: {err}");
             }
         });
 
         mere_log::info!("Started background load for {path}");
         Ok(object_handles)
+    }
+
+    pub fn process_asset_event(&mut self) {
+        while let Ok(event) = self.asset_server.try_recv() {
+            match event {
+                AssetEvent::Ready(handle) => self.asset_server.dispatch_ready(handle),
+            }
+        }
     }
 
     pub fn add_object(&mut self, object: SceneObject) -> SceneObjectHandle {
@@ -116,8 +118,20 @@ impl Scene {
         self.objects.remove(handle);
     }
 
-    pub fn objects(&self) -> impl Iterator<Item = &SceneObject> {
+    pub fn objects(&self) -> slotmap::dense::Values<'_, SceneObjectHandle, SceneObject> {
         self.objects.values()
+    }
+
+    pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
+        self.cameras.iter()
+    }
+
+    pub fn main_camera(&self) -> &Camera {
+        &self.cameras[0]
+    }
+
+    pub fn main_camera_mut(&mut self) -> &mut Camera {
+        &mut self.cameras[0]
     }
 
     pub fn get_object(&self, handle: SceneObjectHandle) -> Option<&SceneObject> {
@@ -128,111 +142,81 @@ impl Scene {
         self.objects.get_mut(handle)
     }
 
-    pub fn get_model(&self, id: ResourceHandle<Model>) -> Option<Arc<Model>> {
+    pub fn get_model(&self, id: ResourceHandle<Model>) -> Option<Shared<Model>> {
         self.asset_server.get(id)
+    }
+
+    pub fn get_material(&self, id: ResourceHandle<Material>) -> Shared<Material> {
+        self.asset_server
+            .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
 }
 
 fn background_load_task(
     path: &str,
-    gltf: GltfAsset,
+    gltf_asset: GltfAsset,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    material_bind_group_layout: wgpu::BindGroupLayout,
     mut asset_server: AssetServer,
 ) -> anyhow::Result<()> {
-    let mere_asset = load_mere_asset(&path)?;
-    let mut meshes_iter = mere_asset.meshes();
+    let mut mere_meshes = load_mere_meshes(&path)?.into_iter();
 
-    gltf.images().par_iter().for_each(|image| {
-        let mut asset_server_inner = asset_server.clone();
+    for model in gltf_asset.models() {
+        let meshes = mere_meshes
+            .by_ref()
+            .take(model.primitives().len())
+            .collect();
+        let model = Model::load((path, model, meshes, &device))?;
 
-        let label = match image.source() {
+        asset_server.add(model);
+    }
+
+    for material in gltf_asset.materials() {
+        asset_server.add(Material::load((path, material, &device, &asset_server))?);
+    }
+
+    const DEFAULT_IMAGE_LOAD_MIP: u32 = 1;
+    gltf_asset.images().par_iter().for_each(|image| {
+        let uri = match image.source() {
+            gltf::image::Source::Uri { uri, .. } => uri,
             gltf::image::Source::View { .. } => {
                 mere_log::error!("Unsupported image source");
                 return;
             }
-            gltf::image::Source::Uri { uri, .. } => uri,
         };
 
-        let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(label);
-        let texture = match load_texture(&image_path, &device, &queue) {
-            Ok(tex) => tex,
-            Err(err) => {
-                mere_log::error!("{err}");
-                return;
+        let options = texture_options(uri);
+        let image_path = path::PathBuf::from(ASSET_DIR).join(&path).join(uri);
+
+        match Texture::load((
+            &image_path,
+            &device,
+            &queue,
+            options,
+            DEFAULT_IMAGE_LOAD_MIP,
+        )) {
+            Ok(tex) => {
+                asset_server.clone().add(tex);
             }
+            Err(err) => mere_log::error!("Failed to load texture {uri}: {err}"),
         };
-        if let Err(err) = asset_server_inner.add(texture) {
-            mere_log::error!("{err}");
-        }
     });
-
-    let materials = gltf
-        .document()
-        .materials()
-        .filter_map(|material| {
-            let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
-            let name = material.name().unwrap_or(&default_name);
-
-            match Material::from_gltf_material(
-                name,
-                material,
-                &device,
-                &material_bind_group_layout,
-                &asset_server,
-            ) {
-                Ok(mat) => Some(mat),
-                Err(err) => {
-                    mere_log::error!("{err}");
-                    None
-                }
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let default_material = Material::new(
-        &format!("{path}_mat_default"),
-        [1.0; 4],
-        &device,
-        &material_bind_group_layout,
-        &asset_server,
-    );
-
-    for model in gltf.document().meshes() {
-        let default_name = format!("{path}_model_{}", model.index());
-        let name = model.name().unwrap_or(&default_name);
-
-        let mut used_materials = Vec::new();
-
-        let meshes = model
-            .primitives()
-            .zip(meshes_iter.by_ref())
-            .map(|(primitive, mere_mesh)| {
-                let material_id = primitive.material().index().unwrap_or(0);
-                if !used_materials.contains(&material_id) {
-                    used_materials.push(material_id);
-                }
-
-                let local_material_id = used_materials
-                    .iter()
-                    .position(|&x| x == material_id)
-                    .unwrap_or(0);
-
-                mere_mesh::Mesh::from_mere_mesh(name, mere_mesh, &device)
-                    .with_material(local_material_id)
-            })
-            .collect();
-
-        let model_materials = used_materials
-            .into_iter()
-            .map(|id| materials.get(id).unwrap_or(&default_material).clone())
-            .collect();
-
-        asset_server.add(Model::new(name, meshes, model_materials))?;
-    }
 
     mere_log::success!("Loaded {path}");
 
     Ok(())
+}
+
+fn texture_options(uri: &str) -> TextureOptions {
+    const DIFFUSE_ANISOTROPY: u16 = 8;
+    const OTHER_ANISOTROPY: u16 = 8;
+
+    let lower = uri.to_lowercase();
+    if lower.contains("normal") || (lower.contains("roughness") && lower.contains("metalness")) {
+        TextureOptions::texture(wgpu::TextureFormat::Rgba8Unorm)
+            .with_mipmap(MipmapOptions::auto(Some(OTHER_ANISOTROPY)))
+    } else {
+        TextureOptions::texture(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .with_mipmap(MipmapOptions::auto(Some(DIFFUSE_ANISOTROPY)))
+    }
 }

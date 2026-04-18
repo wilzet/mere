@@ -1,9 +1,0 @@
-[package]
-name = "common"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-anyhow.workspace = true
-gltf.workspace = true
-mere_mesh = { version = "0.1.0", path = "../../mere_mesh" }

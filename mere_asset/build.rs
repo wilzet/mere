@@ -1,10 +1,19 @@
+//! Asset build script.
+//!
+//! Converts source assets (GLTF) into `.mere` files.
+//! Skips unchanged assets using content hashing.
+//!
+//! Runs in release or when `BUILD_ASSETS=1` is set.
+
 use anyhow::Context;
-use common::{collect_gltf_files, write_mere_file};
+use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_math::{Vec2, Vec3};
+use mere_mesh::{MereMesh, write_mere_file};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -15,12 +24,12 @@ fn main() -> anyhow::Result<()> {
     let asset_processing_enabled = std::env::var("BUILD_ASSETS").is_ok();
     let profile = std::env::var("PROFILE").unwrap_or("debug".to_string());
     if profile != "release" && !asset_processing_enabled {
-        mere_log::info!("Skipping assets processing (use `BUILD_ASSETS=1 cargo run` to enable)");
+        mere_log::info!("Skipping assets processing (use `BUILD_ASSETS=1` to enable)");
         return Ok(());
     }
 
     let out_dir = Path::new(PROCESSED_ASSET_DIR);
-    if let Err(err) = fs::create_dir_all(&out_dir) {
+    if let Err(err) = fs::create_dir_all(out_dir) {
         mere_log::error!(return err);
     }
 
@@ -43,7 +52,7 @@ fn process_asset(path: &Path, out_dir: &Path) -> anyhow::Result<()> {
     let files = match collect_gltf_files(path) {
         Some(files) if !files.is_empty() => files,
         _ => {
-            mere_log::warn!("{asset_root_name} does not contain .gltf");
+            mere_log::info!("{asset_root_name} does not contain .gltf");
             return Ok(());
         }
     };
@@ -83,57 +92,43 @@ fn hash_files(paths: &[PathBuf]) -> anyhow::Result<Vec<u8>> {
     let mut hasher = blake3::Hasher::new();
 
     for path in paths {
-        let data = fs::read(path)?;
-        hasher.update(&data);
+        let mut file = fs::File::open(path)?;
+
+        io::copy(&mut file, &mut hasher)?;
     }
 
     Ok(hasher.finalize().as_bytes().into())
 }
 
-pub fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
-    let mut meshes = Vec::new();
+fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
+    let start = Instant::now();
 
     let (gltf, buffers, _) = gltf::import(path)?;
-    for model in gltf.meshes() {
-        for primitive in model.primitives() {
-            let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+    let meshes = gltf
+        .meshes()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .flat_map(|model| {
+            model
+                .primitives()
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|p| {
+                    let mut mesh = MereMesh::from_gltf_primitive(p, &buffers);
+                    mesh.optimize_mesh();
+                    mesh
+                })
+        })
+        .collect::<Vec<_>>();
 
-            let indices = reader.read_indices().unwrap().into_u32();
-            let index_count = indices.len();
+    let time = start.elapsed();
 
-            let positions = reader
-                .read_positions()
-                .unwrap()
-                .map(|p| Vec3::from(p))
-                .collect::<Vec<_>>();
-            let normals = reader
-                .read_normals()
-                .map(|it| it.map(|n| Vec3::from(n)).collect())
-                .unwrap_or_else(|| vec![Vec3::ZERO; positions.len()]);
-            let tex_coords = reader
-                .read_tex_coords(0)
-                .map(|it| it.into_f32().map(|t| Vec2::from(t)).collect())
-                .unwrap_or_else(|| vec![Vec2::ZERO; positions.len()]);
-            let vertices = indices.map(|i| {
-                let index = i as usize;
-                let position = positions[index];
-                let normal = normals[index];
-                let tex_coord = tex_coords[index];
-                mere_mesh::Vertex {
-                    position,
-                    normal,
-                    tex_coord,
-                    color: Vec3::ONE,
-                }
-            });
-
-            let mut mesh = mere_mesh::MereMesh::new(vertices, index_count);
-            mesh.optimize_mesh();
-            meshes.push(mesh);
-        }
-    }
-
-    mere_log::success!("Processed meshes in {path:?}");
+    mere_log::success!(
+        "Processed {} mesh(es) from {:?} ({:.3} ms)",
+        meshes.len(),
+        path.file_name().unwrap(),
+        time.as_secs_f32() * 1000.0,
+    );
 
     Ok(meshes)
 }

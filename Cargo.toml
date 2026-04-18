@@ -3,19 +3,48 @@ name = "mere"
 version = "0.1.0"
 edition = "2024"
 
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
 [workspace]
 resolver = "3"
-members = ["mere_asset", "mere_asset/common", "mere_common", "mere_log", "mere_math", "mere_mesh", "mere_render"]
+members = [
+    "mere_app",
+    "mere_asset",
+    "mere_asset/mere_asset_common",
+    "mere_common",
+    "mere_log",
+    "mere_math",
+    "mere_mesh",
+    "mere_render",
+]
 
 [workspace.dependencies]
 anyhow = "1.0.102"
 bytemuck = { version = "1.25.0", features = ["derive"] }
+egui = "0.34.1"
+egui-wgpu = { version = "0.34.1", features = ["winit"] }
+egui-winit = "0.34.1"
 gltf = { version = "1.4.1", features = ["KHR_lights_punctual"] }
-image = { version = "0.25.10", default-features = false, features = ["rayon", "png", "hdr"] }
+image = { version = "0.25.10", default-features = false, features = [
+    "rayon",
+    "png",
+    "hdr",
+] }
 meshopt = "0.6.2"
 rayon = "1.11.0"
-wgpu = { version = "29.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "gles", "vulkan", "wgsl"] }
+wgpu = { version = "29.0.1", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "gles",
+    "vulkan",
+    "wgsl",
+] }
 
 [dependencies]
 anyhow.workspace = true
-mere_render = { version = "0.1.0", path = "mere_render" }
+mere_app = { version = "0.1.0", path = "mere_app" }

@@ -1,181 +1,156 @@
-use crate::{handle::ResourceHandle, model::Model, texture::Texture};
-use common::{collect_gltf_files, read_mere_file};
+use crate::{
+    asset_server::AssetServer,
+    handle::{ResourceHandle, UntypedHandle},
+    material::Material,
+    model::{Mesh, Model},
+    texture::{Texture, TextureOptions},
+};
+use anyhow::Context;
+use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
+use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
 use mere_mesh::MereMesh;
-use parking_lot::RwLock;
-use std::{collections::HashMap, path, sync::Arc};
+use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug)]
-pub enum AssetState<R> {
-    Loading,
-    Ready(R),
+pub trait Asset: Sized {
+    type Source<'a>;
+
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self>;
+
+    fn dependencies(&self) -> Vec<UntypedHandle> {
+        Vec::with_capacity(0)
+    }
+
+    fn finish(&mut self, _asset_server: &AssetServer) {}
 }
 
-type ResourceMap<R> = Arc<RwLock<HashMap<ResourceHandle<R>, AssetState<Arc<R>>>>>;
+impl Asset for Model {
+    type Source<'a> = (&'a str, GltfMesh<'a>, Vec<MereMesh>, &'a wgpu::Device);
 
-#[derive(Clone, Debug)]
-pub(crate) struct AssetServer {
-    models: ResourceMap<Model>,
-    textures: ResourceMap<Texture>,
-}
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, model, meshes, device) = source;
+        let default_name = format!("{path}_model_{}", model.index());
+        let name = model.name().unwrap_or(&default_name);
 
-impl AssetServer {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let mut textures = HashMap::new();
-
-        Texture::DEFAULT_TEXTURES
-            .iter()
-            .for_each(|&(id, label, color)| {
-                let texture = match Texture::from_bytes(device, queue, 1, 1, &color, label) {
-                    Ok(tex) => tex,
-                    Err(err) => {
-                        mere_log::error!("{err}");
-                        return;
-                    }
+        let meshes = model
+            .primitives()
+            .zip(meshes)
+            .map(|(primitive, mere_mesh)| {
+                let material = match primitive.material().name() {
+                    Some(name) => ResourceHandle::from(name),
+                    None => Material::DEFAULT_MATERIAL_ID,
                 };
 
-                textures.insert(id, AssetState::Ready(texture.into()));
-            });
+                Mesh::from_mere_mesh(name, mere_mesh, &device).with_material(material)
+            })
+            .collect();
 
-        Self {
-            models: Arc::new(RwLock::new(HashMap::new())),
-            textures: Arc::new(RwLock::new(textures)),
-        }
+        Ok(Self::new(name, meshes))
     }
 }
 
-pub trait Resource<R> {
-    fn get(&self, handle: ResourceHandle<R>) -> Option<Arc<R>>;
-    fn add(&mut self, value: R) -> anyhow::Result<ResourceHandle<R>>;
-    fn reserve_handle(&self, handle: ResourceHandle<R>);
-}
+impl Asset for Texture {
+    type Source<'a> = (
+        &'a Path,
+        &'a wgpu::Device,
+        &'a wgpu::Queue,
+        TextureOptions,
+        u32,
+    );
 
-impl Resource<Model> for AssetServer {
-    fn get(&self, handle: ResourceHandle<Model>) -> Option<Arc<Model>> {
-        match self.models.read().get(&handle) {
-            Some(AssetState::Ready(model)) => Some(model.clone()),
-            _ => None,
-        }
-    }
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, device, queue, options, mip_0) = source;
 
-    fn add(&mut self, model: Model) -> anyhow::Result<ResourceHandle<Model>> {
-        let id = ResourceHandle::from(model.name());
-        {
-            if let Some(AssetState::Ready(_)) = self.models.read().get(&id) {
-                return Ok(id);
-            }
-        }
+        let label = match path.file_name().and_then(|s| s.to_str()) {
+            Some(name) => name,
+            None => anyhow::bail!("No file found in path: {path:?}"),
+        };
 
-        self.models
-            .write()
-            .insert(id, AssetState::Ready(model.into()));
-        Ok(id)
-    }
+        let image = {
+            let img = image::open(path)?;
+            let (width, height) = img.dimensions();
+            let factor = 1 << mip_0;
+            img.resize(
+                (width / factor).max(1),
+                (height / factor).max(1),
+                image::imageops::FilterType::Triangle,
+            )
+        };
 
-    fn reserve_handle(&self, handle: ResourceHandle<Model>) {
-        self.models
-            .write()
-            .entry(handle)
-            .or_insert(AssetState::Loading);
+        Ok(Self::from_image(device, queue, image, label, options)?)
     }
 }
 
-impl Resource<Texture> for AssetServer {
-    fn get(&self, handle: ResourceHandle<Texture>) -> Option<Arc<Texture>> {
-        match self.textures.read().get(&handle) {
-            Some(AssetState::Ready(texture)) => Some(texture.clone()),
-            _ => None,
-        }
+impl Asset for Material {
+    type Source<'a> = (&'a str, GltfMaterial<'a>, &'a wgpu::Device, &'a AssetServer);
+
+    fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
+        let (path, material, device, asset_server) = source;
+
+        let default_name = format!("{path}_mat_{}", material.index().unwrap_or(0));
+        let name = material.name().unwrap_or(&default_name);
+
+        Ok(Self::from_gltf_material(
+            name,
+            material,
+            device,
+            asset_server,
+        ))
     }
 
-    fn add(&mut self, texture: Texture) -> anyhow::Result<ResourceHandle<Texture>> {
-        let id = ResourceHandle::from(texture.label());
-        {
-            if let Some(AssetState::Ready(_)) = self.textures.read().get(&id) {
-                return Ok(id);
-            }
-        }
-
-        self.textures
-            .write()
-            .insert(id, AssetState::Ready(texture.into()));
-        Ok(id)
+    fn dependencies(&self) -> Vec<UntypedHandle> {
+        vec![
+            self.diffuse.into(),
+            self.rough_metal.into(),
+            self.normal.into(),
+        ]
     }
 
-    fn reserve_handle(&self, handle: ResourceHandle<Texture>) {
-        self.textures
-            .write()
-            .entry(handle)
-            .or_insert(AssetState::Loading);
-    }
-}
-
-const DEFAULT_IMAGE_LOAD_MIP: u32 = 5;
-
-pub(crate) struct MereAsset {
-    meshes: Vec<MereMesh>,
-}
-
-impl MereAsset {
-    pub fn meshes(self) -> impl Iterator<Item = MereMesh> {
-        self.meshes.into_iter()
+    fn finish(&mut self, asset_server: &AssetServer) {
+        self.try_finish(asset_server.device(), asset_server);
     }
 }
 
-pub(crate) fn load_mere_asset(path: impl AsRef<path::Path>) -> anyhow::Result<MereAsset> {
-    let model_path = path::PathBuf::from(PROCESSED_ASSET_DIR)
-        .join(&path)
+pub fn load_mere_meshes(path: impl AsRef<Path>) -> anyhow::Result<Vec<MereMesh>> {
+    let model_path = PathBuf::from(PROCESSED_ASSET_DIR)
+        .join(path)
         .with_extension("mere");
 
-    let meshes = read_mere_file(&model_path)?;
-
-    Ok(MereAsset { meshes })
+    mere_mesh::read_mere_file(&model_path)
 }
 
-pub(crate) fn load_texture(
-    path: &path::PathBuf,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> anyhow::Result<Texture> {
-    let label = match path.file_name().map_or(None, |s| s.to_str()) {
-        Some(name) => name,
-        None => anyhow::bail!("No file found in path: {path:?}"),
-    };
-
-    let image = load_image(path, DEFAULT_IMAGE_LOAD_MIP)?;
-    Ok(Texture::from_image(device, queue, image, label))
-}
-
-fn load_image(uri: &path::PathBuf, mip: u32) -> anyhow::Result<image::DynamicImage> {
-    let image = image::open(uri)?;
-    let (width, height) = image.dimensions();
-    let factor = 1 << mip;
-    Ok(image.resize(
-        width / factor,
-        height / factor,
-        image::imageops::FilterType::Nearest,
-    ))
-}
-
-pub(crate) struct GltfAsset {
+pub struct GltfAsset {
     document: gltf::Document,
 }
 
 impl GltfAsset {
-    pub fn document(&self) -> &gltf::Document {
-        &self.document
+    pub fn nodes(&self) -> gltf::iter::Nodes<'_> {
+        self.document.nodes()
     }
 
-    pub fn images(&self) -> Vec<gltf::image::Image<'_>> {
+    pub fn models(&self) -> gltf::iter::Meshes<'_> {
+        self.document.meshes()
+    }
+
+    pub fn images(&self) -> Vec<gltf::Image<'_>> {
         self.document.images().collect()
+    }
+
+    pub fn materials(&self) -> gltf::iter::Materials<'_> {
+        self.document.materials()
     }
 }
 
-pub(crate) fn load_gltf_asset(path: impl AsRef<path::Path>) -> anyhow::Result<GltfAsset> {
-    let gltf_path = path::PathBuf::from(ASSET_DIR).join(&path);
-    let gltf_paths = collect_gltf_files(&gltf_path).unwrap();
-    assert!(gltf_paths.len() == 1);
+pub fn load_gltf_asset(path: impl AsRef<Path>) -> anyhow::Result<GltfAsset> {
+    let gltf_path = PathBuf::from(ASSET_DIR).join(path);
+    let gltf_paths = collect_gltf_files(&gltf_path)
+        .context(format!("No `.gltf` file found in {gltf_path:?}"))?;
+
+    if gltf_paths.len() != 1 {
+        anyhow::bail!("Expected exactly one `.gltf` file in {gltf_path:?}");
+    }
+
     let gltf_path = &gltf_paths[0];
 
     Ok(GltfAsset {

@@ -6,21 +6,22 @@ edition = "2024"
 [build-dependencies]
 anyhow.workspace = true
 blake3 = "1.8.3"
-common = { version = "0.1.0", path = "common" }
 gltf.workspace = true
+mere_asset_common = { version = "0.1.0", path = "mere_asset_common" }
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
-mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
+rayon.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 blake3 = "1.8.3"
 bytemuck.workspace = true
-common = { version = "0.1.0", path = "common" }
+crossbeam = "0.8.4"
 gltf.workspace = true
 image.workspace = true
+mere_asset_common = { version = "0.1.0", path = "mere_asset_common" }
 mere_common = { version = "0.1.0", path = "../mere_common" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
