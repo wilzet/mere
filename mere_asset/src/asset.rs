@@ -10,7 +10,6 @@ use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
 use image::GenericImageView;
 use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_mesh::MereMesh;
 use std::path::{Path, PathBuf};
 
 pub trait Asset: Sized {
@@ -26,7 +25,12 @@ pub trait Asset: Sized {
 }
 
 impl Asset for Model {
-    type Source<'a> = (&'a str, GltfMesh<'a>, Vec<MereMesh>, &'a wgpu::Device);
+    type Source<'a> = (
+        &'a str,
+        GltfMesh<'a>,
+        Vec<mere_mesh::Mesh>,
+        &'a wgpu::Device,
+    );
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
         let (path, model, meshes, device) = source;
@@ -112,7 +116,7 @@ impl Asset for Material {
     }
 }
 
-pub fn load_mere_meshes(path: impl AsRef<Path>) -> anyhow::Result<Vec<MereMesh>> {
+pub fn load_mere_meshes(path: impl AsRef<Path>) -> anyhow::Result<Vec<mere_mesh::Mesh>> {
     let model_path = PathBuf::from(PROCESSED_ASSET_DIR)
         .join(path)
         .with_extension("mere");

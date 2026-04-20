@@ -8,7 +8,7 @@
 use anyhow::Context;
 use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
-use mere_mesh::{MereMesh, write_mere_file};
+use mere_mesh::{Mesh, write_mere_file};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     fs, io,
@@ -100,7 +100,7 @@ fn hash_files(paths: &[PathBuf]) -> anyhow::Result<Vec<u8>> {
     Ok(hasher.finalize().as_bytes().into())
 }
 
-fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
+fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::Mesh>> {
     let start = Instant::now();
 
     let (gltf, buffers, _) = gltf::import(path)?;
@@ -114,7 +114,7 @@ fn process_meshes(path: &PathBuf) -> anyhow::Result<Vec<mere_mesh::MereMesh>> {
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|p| {
-                    let mut mesh = MereMesh::from_gltf_primitive(p, &buffers);
+                    let mut mesh = Mesh::from_gltf_primitive(p, &buffers);
                     mesh.optimize_mesh();
                     mesh
                 })

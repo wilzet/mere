@@ -1,5 +1,4 @@
 use crate::{handle::ResourceHandle, material::Material};
-use mere_mesh::MereMesh;
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Debug)]
@@ -30,7 +29,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub(crate) fn from_mere_mesh(name: &str, mesh: MereMesh, device: &wgpu::Device) -> Self {
+    pub(crate) fn from_mere_mesh(name: &str, mesh: mere_mesh::Mesh, device: &wgpu::Device) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{name}_vertex_buffer")),
             contents: bytemuck::cast_slice(&mesh.vertices),

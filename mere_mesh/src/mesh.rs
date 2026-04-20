@@ -7,12 +7,12 @@ use std::{
 };
 
 #[derive(Clone, Debug, Default)]
-pub struct MereMesh {
+pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
 }
 
-impl MereMesh {
+impl Mesh {
     pub fn new(vertices: impl IntoIterator<Item = Vertex>, index_count: usize) -> Self {
         let vertices = vertices.into_iter().collect::<Vec<_>>();
         let (vertex_count, vertex_remap) = meshopt::generate_vertex_remap(&vertices, None);
@@ -95,7 +95,7 @@ impl MereMesh {
         let indices = bytemuck::cast_slice(&bytes[v_end..i_end]);
 
         Ok((
-            MereMesh {
+            Mesh {
                 vertices: vertices.to_vec(),
                 indices: indices.to_vec(),
             },
@@ -106,7 +106,7 @@ impl MereMesh {
     pub fn from_gltf_primitive(
         primitive: gltf::Primitive,
         buffers: &Vec<gltf::buffer::Data>,
-    ) -> MereMesh {
+    ) -> Mesh {
         let reader = primitive.reader(|b| Some(&buffers[b.index()]));
 
         let indices = reader
@@ -179,7 +179,7 @@ impl MereMesh {
     }
 }
 
-pub fn write_mere_file(output_path: &Path, meshes: Vec<MereMesh>) -> anyhow::Result<()> {
+pub fn write_mere_file(output_path: &Path, meshes: Vec<Mesh>) -> anyhow::Result<()> {
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -199,14 +199,14 @@ pub fn write_mere_file(output_path: &Path, meshes: Vec<MereMesh>) -> anyhow::Res
     Ok(())
 }
 
-pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MereMesh>> {
+pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<Mesh>> {
     let mere_bytes = fs::read(&path)?;
     let mesh_count = u32::from_le_bytes(mere_bytes[0..4].try_into()?) as usize;
 
     let mut offset = 4;
     let mut meshes = Vec::new();
     for _ in 0..mesh_count {
-        let (mesh, read_bytes) = MereMesh::from_mere_file(&mere_bytes[offset..])?;
+        let (mesh, read_bytes) = Mesh::from_mere_file(&mere_bytes[offset..])?;
         meshes.push(mesh);
         offset += read_bytes;
     }
