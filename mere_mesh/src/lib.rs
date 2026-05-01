@@ -1,8 +1,12 @@
 //! Custom mesh format and utilities for reading/writing engine mesh data.
 
 mod mesh;
+mod meshlet;
 mod util;
 mod vertex;
 
-pub use mesh::{Mesh, read_mere_file, write_mere_file};
-pub use vertex::Vertex;
+pub use {
+    mesh::{MeshletMesh, read_mere_file, write_mere_file},
+    meshlet::Meshlet,
+    vertex::Vertex,
+};

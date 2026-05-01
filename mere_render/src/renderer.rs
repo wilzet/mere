@@ -1,13 +1,8 @@
 use crate::{
-    camera::CameraUniform,
-    instance::InstanceRaw,
-    lights::LightUniform,
-    model::{DrawItem, DrawLight, DrawModel},
-    pipeline::create_render_pipeline,
+    CLUSTER_SLOTS, camera::CameraUniform, lights::LightUniform, pipeline::create_render_pipeline,
 };
-use mere_asset::{Camera, Material, Texture};
+use mere_asset::{Camera, Material, MeshletBindGroups, ResourceStorage, Texture};
 use mere_math::{Quat, Vec3};
-use mere_mesh::Vertex;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -18,9 +13,7 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
-    opaque_render_pipeline: wgpu::RenderPipeline,
-    alpha_render_pipeline: wgpu::RenderPipeline,
-    light_pipeline: wgpu::RenderPipeline,
+    render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     bg_color: wgpu::Color,
     main_camera_uniform: CameraUniform,
@@ -29,6 +22,7 @@ pub struct Renderer {
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
+    pub meshlet_bind_groups: Option<MeshletBindGroups>,
 }
 
 impl Renderer {
@@ -60,7 +54,8 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Rendering device"),
-                required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                    | wgpu::Features::POLYGON_MODE_LINE,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: Default::default(),
@@ -169,53 +164,26 @@ impl Renderer {
                     Some(&camera_bind_group_layout),
                     Some(&light_bind_group_layout),
                     Some(Material::material_bind_group_layout(&device)),
+                    Some(
+                        &device.create_bind_group_layout(
+                            &ResourceStorage::new(CLUSTER_SLOTS)
+                                .meshlet_mesh_material_bind_group_layout,
+                        ),
+                    ),
                 ],
                 immediate_size: 0,
             });
-        let forward_main_shader = wgpu::include_wgsl!("shader.wgsl");
 
-        let opaque_render_pipeline = create_render_pipeline(
+        let render_pipeline = create_render_pipeline(
+            Some("Render Pipeline"),
             &device,
             &render_pipeline_layout,
             config.format,
             Some(Texture::DEPTH_FORMAT),
-            &[Vertex::desc(), InstanceRaw::desc()],
+            &[],
             Some(wgpu::BlendState::REPLACE),
-            forward_main_shader.clone(),
+            wgpu::include_wgsl!("meshlet_debug.wgsl"),
         );
-
-        let alpha_render_pipeline = create_render_pipeline(
-            &device,
-            &render_pipeline_layout,
-            config.format,
-            Some(Texture::DEPTH_FORMAT),
-            &[Vertex::desc(), InstanceRaw::desc()],
-            Some(wgpu::BlendState::ALPHA_BLENDING),
-            forward_main_shader,
-        );
-
-        let light_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Light Pipeline Layout"),
-                bind_group_layouts: &[
-                    Some(&camera_bind_group_layout),
-                    Some(&light_bind_group_layout),
-                ],
-                immediate_size: 0,
-            });
-
-            let shader = wgpu::include_wgsl!("light.wgsl");
-
-            create_render_pipeline(
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[Vertex::desc()],
-                Some(wgpu::BlendState::REPLACE),
-                shader,
-            )
-        };
 
         Ok(Self {
             surface,
@@ -223,9 +191,7 @@ impl Renderer {
             queue,
             config,
             is_surface_configured: false,
-            opaque_render_pipeline,
-            alpha_render_pipeline,
-            light_pipeline,
+            render_pipeline,
             depth_texture,
             bg_color: wgpu::Color {
                 r: 0.1,
@@ -239,6 +205,7 @@ impl Renderer {
             light_uniform,
             light_buffer,
             light_bind_group,
+            meshlet_bind_groups: None,
         })
     }
 
@@ -334,10 +301,13 @@ impl Renderer {
         &self,
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
-        instances: &wgpu::Buffer,
-        opaque_draw_items: Vec<DrawItem>,
-        alpha_draw_items: Vec<DrawItem>,
+        resources: &ResourceStorage,
+        material: &Material,
     ) {
+        let Some(meshlet_bind_groups) = self.meshlet_bind_groups.as_ref() else {
+            return;
+        };
+
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -362,29 +332,19 @@ impl Renderer {
             multiview_mask: None,
         });
 
-        render_pass.set_vertex_buffer(1, instances.slice(..));
-
-        render_pass.set_pipeline(&self.light_pipeline);
-        if let Some(mesh) = opaque_draw_items.get(26) {
-            render_pass.draw_light_mesh(
-                mesh.clone(),
-                &self.main_camera_bind_group,
-                &self.light_bind_group,
-            );
-        }
-
-        render_pass.set_pipeline(&self.opaque_render_pipeline);
-        render_pass.draw_meshes(
-            opaque_draw_items,
-            &self.main_camera_bind_group,
-            &self.light_bind_group,
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.main_camera_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.light_bind_group, &[]);
+        render_pass.set_bind_group(2, &material.bind_group, &[]);
+        render_pass.set_bind_group(
+            3,
+            &meshlet_bind_groups.meshlet_mesh_material_bind_group,
+            &[],
         );
 
-        render_pass.set_pipeline(&self.alpha_render_pipeline);
-        render_pass.draw_meshes(
-            alpha_draw_items,
-            &self.main_camera_bind_group,
-            &self.light_bind_group,
+        render_pass.draw(
+            0..mere_mesh::Meshlet::MAX_INDICES_PER_MESHLET,
+            0..resources.rightmost_slot,
         );
     }
 }

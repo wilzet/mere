@@ -28,6 +28,7 @@ mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
 meshopt.workspace = true
 parking_lot = "0.12.5"
+range-alloc = "0.1.5"
 rayon.workspace = true
 slotmap = "1.1.1"
 wgpu.workspace = true

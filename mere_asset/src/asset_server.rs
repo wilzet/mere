@@ -2,10 +2,10 @@ use crate::{
     asset::Asset,
     handle::{ResourceHandle, UntypedHandle},
     material::Material,
-    model::Model,
     texture::{Texture, TextureOptions},
 };
 use crossbeam::channel::{Receiver, Sender, unbounded};
+use mere_mesh::MeshletMesh;
 use parking_lot::RwLock;
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 
@@ -31,12 +31,13 @@ impl<R> AssetState<R> {
 #[derive(Clone, Debug)]
 pub enum AssetEvent {
     Ready(UntypedHandle),
+    MeshletReady(ResourceHandle<MeshletMesh>),
 }
 
 #[derive(Clone, Debug)]
 pub struct AssetServer {
     device: wgpu::Device,
-    models: ResourceMap<Model>,
+    meshlets: ResourceMap<MeshletMesh>,
     textures: ResourceMap<Texture>,
     materials: ResourceMap<Material>,
     dependency_listeners: SharedMap<UntypedHandle, Vec<UntypedHandle>>,
@@ -74,7 +75,7 @@ impl AssetServer {
 
         let asset_server = Self {
             device: device.clone(),
-            models: Arc::new(RwLock::new(HashMap::new())),
+            meshlets: Arc::new(RwLock::new(HashMap::new())),
             textures: Arc::new(RwLock::new(textures)),
             materials: Arc::new(RwLock::new(HashMap::new())),
             dependency_listeners: Arc::new(RwLock::new(HashMap::new())),
@@ -108,6 +109,8 @@ impl AssetServer {
                 self.finish_untyped(listener);
             }
         }
+
+        self.finish_untyped(handle);
     }
 
     fn finish_untyped(&self, handle: UntypedHandle) {
@@ -117,13 +120,20 @@ impl AssetServer {
             self.finish(ResourceHandle::<Material>::new(*handle));
         } else if type_id == TypeId::of::<Texture>() {
             self.finish(ResourceHandle::<Texture>::new(*handle));
-        } else if type_id == TypeId::of::<Model>() {
-            self.finish(ResourceHandle::<Model>::new(*handle));
+        } else if type_id == TypeId::of::<MeshletMesh>() {
+            self.finish(ResourceHandle::<MeshletMesh>::new(*handle));
         }
     }
 
     pub fn try_recv(&self) -> anyhow::Result<AssetEvent> {
         Ok(self.event_rx.try_recv()?)
+    }
+
+    pub fn send(
+        &self,
+        asset_event: AssetEvent,
+    ) -> Result<(), crossbeam::channel::SendError<AssetEvent>> {
+        self.event_tx.send(asset_event)
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -173,7 +183,7 @@ macro_rules! resource_impl {
                     .write()
                     .insert(id, AssetState::new(Some(value)));
 
-                let _ = self.event_tx.send(AssetEvent::Ready(id.into()));
+                let _ = self.send(AssetEvent::Ready(id.into()));
 
                 id
             }
@@ -195,7 +205,7 @@ macro_rules! resource_impl {
     };
 }
 
-resource_impl!(Model, models, name);
+resource_impl!(MeshletMesh, meshlets, name);
 resource_impl!(Texture, textures, label);
 resource_impl!(Material, materials, name);
 

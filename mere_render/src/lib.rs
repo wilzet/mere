@@ -1,14 +1,11 @@
 use crate::{
     camera::CameraController,
     egui_render::{DebugWindow, EguiRenderer},
-    instance::InstanceRaw,
-    model::DrawItem,
     renderer::Renderer,
 };
 use mere_asset::{Camera, Material, Scene};
 use mere_math::Vec3;
 use std::{sync::Arc, time::Duration};
-use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::ActiveEventLoop,
@@ -18,11 +15,11 @@ use winit::{
 
 mod camera;
 mod egui_render;
-mod instance;
 mod lights;
-mod model;
 mod pipeline;
 mod renderer;
+
+pub const CLUSTER_SLOTS: u32 = 1 << 16;
 
 pub struct State {
     mere_renderer: Renderer,
@@ -32,7 +29,6 @@ pub struct State {
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
     scene: Scene,
-    instance_buffer: wgpu::Buffer,
 }
 
 impl State {
@@ -42,31 +38,24 @@ impl State {
         let (device, queue) = mere_renderer.get_device_queue();
         let config = mere_renderer.get_config();
 
-        let mut scene = Scene::new(device, queue);
-        scene.load_gltf("sponza/main_sponza", device, queue)?;
-        scene.load_gltf("sponza/pkg_a_curtains", device, queue)?;
+        let mut scene = Scene::new(device, queue, CLUSTER_SLOTS);
+        //scene.load_gltf("sponza/main_sponza", device, queue)?;
+        //scene.load_gltf("sponza/pkg_a_curtains", device, queue)?;
         let teapot = scene.load_gltf("utah_teapot", device, queue)?[0];
-        scene.get_object_mut(teapot).unwrap().transform.translation += Vec3::Y * 2.0;
-
-        let instances = scene
-            .objects()
-            .map(|obj| InstanceRaw::from_transform(obj.transform))
-            .collect::<Vec<_>>();
-
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        scene
+            .get_instance_mut(teapot)
+            .unwrap()
+            .transform
+            .translation += Vec3::Y * 2.0;
 
         let mut camera = Camera::new(
             45.0f32.to_radians(),
             config.width as f32 / config.height as f32,
             0.1,
             100.0,
-            Vec3::new(5.0, 5.0, -5.0),
+            Vec3::new(1.0, 5.0, -5.0),
         );
-        camera.look_at(scene.get_object(teapot).unwrap().transform.translation);
+        camera.look_at(scene.get_instance(teapot).unwrap().transform.translation);
         scene.add_camera(camera);
 
         let camera_controller = CameraController::new(5.0, 0.002);
@@ -83,7 +72,6 @@ impl State {
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
             scene,
-            instance_buffer,
         })
     }
 
@@ -202,6 +190,10 @@ impl State {
 
         self.scene.process_asset_event();
 
+        let (device, queue) = self.mere_renderer.get_device_queue();
+        self.mere_renderer.meshlet_bind_groups =
+            self.scene.prepare_meshlet_resources(device, queue);
+
         self.camera_controller
             .update_camera(self.scene.main_camera_mut(), dt);
         self.mere_renderer
@@ -215,47 +207,14 @@ impl State {
             None => return Ok(()),
         };
 
-        let default_lock = self.scene.get_material(Material::DEFAULT_MATERIAL_ID);
-        let default_material = default_lock.read();
-        let default_bg = default_material.bind_group.as_ref().unwrap();
-
-        let mut opaque_draw_items = Vec::new();
-        let mut alpha_draw_items = Vec::new();
-        for (i, object) in self.scene.objects().enumerate() {
-            if let Some(model) = self.scene.get_model(object.handle()) {
-                for mesh in model.read().meshes() {
-                    let lock = self.scene.get_material(mesh.material);
-                    let material = lock.read();
-                    let bind_group = match &material.bind_group {
-                        Some(bg) => bg,
-                        None => default_bg,
-                    };
-
-                    let item = DrawItem {
-                        instance_index: i as u32,
-                        mesh: mesh.clone(),
-                        material: bind_group.clone(),
-                    };
-
-                    if material.alpha_blended {
-                        alpha_draw_items.push(item);
-                    } else {
-                        opaque_draw_items.push(item);
-                    }
-                }
-            }
-        }
-
         let (device, queue) = self.mere_renderer.get_device_queue();
         let config = self.mere_renderer.get_config();
 
-        self.mere_renderer.render(
-            &view,
-            &mut encoder,
-            &self.instance_buffer,
-            opaque_draw_items,
-            alpha_draw_items,
-        );
+        let material_lock = self.scene.get_material(Material::DEFAULT_MATERIAL_ID);
+        let material = material_lock.read();
+
+        self.mere_renderer
+            .render(&view, &mut encoder, self.scene.resources(), &material);
 
         {
             self.egui_renderer.begin_frame(&self.window);

@@ -3,57 +3,36 @@ use crate::{
     asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
     camera::Camera,
     handle::ResourceHandle,
+    instances::{Instance, InstanceHandle, InstanceStorage},
     material::Material,
-    model::Model,
+    meshlets::MeshletStorage,
+    resources::{MeshletBindGroups, ResourceStorage},
     texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
+use mere_mesh::MeshletMesh;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use slotmap::DenseSlotMap;
 use std::path;
 
-#[derive(Clone, Copy, Debug)]
-pub struct SceneObject {
-    pub transform: Transform,
-    model_handle: ResourceHandle<Model>,
-}
-
-impl SceneObject {
-    pub fn new(handle: ResourceHandle<Model>, transform: Transform) -> Self {
-        Self {
-            transform,
-            model_handle: handle,
-        }
-    }
-
-    pub fn handle(&self) -> ResourceHandle<Model> {
-        self.model_handle
-    }
-}
-
-pub type SceneObjectHandle = slotmap::DefaultKey;
-
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Scene {
-    objects: DenseSlotMap<SceneObjectHandle, SceneObject>,
     cameras: Vec<Camera>,
     asset_server: AssetServer,
+    instances: InstanceStorage,
+    meshlets: MeshletStorage,
+    resources: ResourceStorage,
 }
 
 impl Scene {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, cluster_slots: u32) -> Self {
         Self {
-            objects: DenseSlotMap::new(),
             cameras: Vec::new(),
             asset_server: AssetServer::new(device, queue),
+            instances: InstanceStorage::new(),
+            meshlets: MeshletStorage::new(device),
+            resources: ResourceStorage::new(cluster_slots),
         }
-    }
-
-    pub fn add_camera(&mut self, camera: Camera) -> usize {
-        let id = self.cameras.len();
-        self.cameras.push(camera);
-        id
     }
 
     pub fn load_gltf(
@@ -61,21 +40,20 @@ impl Scene {
         path: &str,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> anyhow::Result<Vec<SceneObjectHandle>> {
+    ) -> anyhow::Result<Vec<InstanceHandle>> {
         let gltf_asset = load_gltf_asset(path)?;
 
         let asset_server_inner = self.asset_server.clone();
         let device = device.clone();
         let queue = queue.clone();
 
-        let object_handles = gltf_asset
+        let instance_handles = gltf_asset
             .nodes()
             .filter_map(|node| {
                 let model = node.mesh()?;
                 let default_name = format!("{path}_model_{}", model.index());
-                let name = model.name().unwrap_or(&default_name);
+                let name = model.name().map_or(default_name, |s| s.to_string());
 
-                let model_handle = ResourceHandle::from(name);
                 let (translation, rotation, scale) = node.transform().decomposed();
                 let transform = Transform {
                     translation: translation.into(),
@@ -83,9 +61,28 @@ impl Scene {
                     scale: scale.into(),
                 };
 
-                asset_server_inner.reserve_handle(model_handle);
+                Some((model, transform, name))
+            })
+            .flat_map(|(model, transform, name)| {
+                model.primitives().map(move |mesh| {
+                    let meshlet_mesh_handle =
+                        ResourceHandle::from(format!("{name}_{}", mesh.index()).as_str());
 
-                Some(self.add_object(SceneObject::new(model_handle, transform)))
+                    let material_handle = match mesh.material().name() {
+                        Some(name) => ResourceHandle::from(name),
+                        None => Material::DEFAULT_MATERIAL_ID,
+                    };
+
+                    (transform, meshlet_mesh_handle, material_handle)
+                })
+            })
+            .map(|(transform, meshlet_mesh_handle, material_handle)| {
+                asset_server_inner.reserve_handle(meshlet_mesh_handle);
+                asset_server_inner.reserve_handle(material_handle);
+                self.instances.add_instance(
+                    Instance::new(transform, meshlet_mesh_handle),
+                    material_handle,
+                )
             })
             .collect();
 
@@ -99,31 +96,30 @@ impl Scene {
         });
 
         mere_log::info!("Started background load for {path}");
-        Ok(object_handles)
+        Ok(instance_handles)
     }
 
     pub fn process_asset_event(&mut self) {
         while let Ok(event) = self.asset_server.try_recv() {
             match event {
                 AssetEvent::Ready(handle) => self.asset_server.dispatch_ready(handle),
+                AssetEvent::MeshletReady(handle) => {
+                    let meshlet_mesh_lock = self.asset_server.get(handle).unwrap();
+                    let meshlet_mesh = meshlet_mesh_lock.read();
+                    self.meshlets.queue_upload(&meshlet_mesh);
+                }
             }
         }
     }
 
-    pub fn add_object(&mut self, object: SceneObject) -> SceneObjectHandle {
-        self.objects.insert(object)
+    pub fn instances(&self) -> slotmap::dense::Values<'_, InstanceHandle, Instance> {
+        self.instances.iter()
     }
 
-    pub fn remove_object(&mut self, handle: SceneObjectHandle) {
-        self.objects.remove(handle);
-    }
-
-    pub fn objects(&self) -> slotmap::dense::Values<'_, SceneObjectHandle, SceneObject> {
-        self.objects.values()
-    }
-
-    pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
-        self.cameras.iter()
+    pub fn add_camera(&mut self, camera: Camera) -> usize {
+        let id = self.cameras.len();
+        self.cameras.push(camera);
+        id
     }
 
     pub fn main_camera(&self) -> &Camera {
@@ -134,21 +130,47 @@ impl Scene {
         &mut self.cameras[0]
     }
 
-    pub fn get_object(&self, handle: SceneObjectHandle) -> Option<&SceneObject> {
-        self.objects.get(handle)
+    pub fn get_instance(&self, handle: InstanceHandle) -> Option<&Instance> {
+        self.instances.get(handle)
     }
 
-    pub fn get_object_mut(&mut self, handle: SceneObjectHandle) -> Option<&mut SceneObject> {
-        self.objects.get_mut(handle)
+    pub fn get_instance_mut(&mut self, handle: InstanceHandle) -> Option<&mut Instance> {
+        self.instances.get_mut(handle)
     }
 
-    pub fn get_model(&self, id: ResourceHandle<Model>) -> Option<Shared<Model>> {
+    pub fn get_meshlet_mesh(&self, id: ResourceHandle<MeshletMesh>) -> Option<Shared<MeshletMesh>> {
         self.asset_server.get(id)
     }
 
     pub fn get_material(&self, id: ResourceHandle<Material>) -> Shared<Material> {
         self.asset_server
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
+    }
+
+    pub fn prepare_meshlet_resources(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Option<MeshletBindGroups> {
+        if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
+            return None;
+        }
+
+        self.instances.instance_uniforms.write_buffer(device, queue);
+        self.instances
+            .instance_material_ids
+            .write_buffer(device, queue);
+
+        self.meshlets.perform_pending_uploads(device, queue);
+
+        Some(
+            self.resources
+                .bind_groups(device, &self.meshlets, &self.instances),
+        )
+    }
+
+    pub fn resources(&self) -> &ResourceStorage {
+        &self.resources
     }
 }
 
@@ -162,17 +184,30 @@ fn background_load_task(
     let mut mere_meshes = load_mere_meshes(&path)?.into_iter();
 
     for model in gltf_asset.models() {
-        let meshes = mere_meshes
+        let default_name = format!("{path}_model_{}", model.index());
+        let name = model.name().unwrap_or(&default_name);
+        mere_meshes
             .by_ref()
-            .take(model.primitives().len())
-            .collect();
-        let model = Model::load((path, model, meshes, &device))?;
-
-        asset_server.add(model);
+            .zip(model.primitives())
+            .for_each(|(mesh, primitive)| {
+                match MeshletMesh::load((name, primitive.index() as u32, mesh)) {
+                    Ok(mesh) => {
+                        asset_server.add(mesh);
+                    }
+                    Err(err) => {
+                        mere_log::error!("Failed to load mesh {name}_{}: {err}", primitive.index())
+                    }
+                };
+            });
     }
 
     for material in gltf_asset.materials() {
-        asset_server.add(Material::load((path, material, &device, &asset_server))?);
+        match Material::load((path, material.clone(), &device, &asset_server)) {
+            Ok(material) => {
+                asset_server.add(material);
+            }
+            Err(err) => mere_log::error!("Failed to load material: {:?}: {err}", material.name()),
+        }
     }
 
     const DEFAULT_IMAGE_LOAD_MIP: u32 = 1;

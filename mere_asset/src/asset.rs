@@ -1,15 +1,15 @@
 use crate::{
-    asset_server::AssetServer,
+    asset_server::{AssetEvent, AssetServer},
     handle::{ResourceHandle, UntypedHandle},
     material::Material,
-    model::{Mesh, Model},
     texture::{Texture, TextureOptions},
 };
 use anyhow::Context;
-use gltf::{Material as GltfMaterial, Mesh as GltfMesh};
+use gltf::Material as GltfMaterial;
 use image::GenericImageView;
 use mere_asset_common::collect_gltf_files;
 use mere_common::{ASSET_DIR, PROCESSED_ASSET_DIR};
+use mere_mesh::MeshletMesh;
 use std::path::{Path, PathBuf};
 
 pub trait Asset: Sized {
@@ -24,33 +24,20 @@ pub trait Asset: Sized {
     fn finish(&mut self, _asset_server: &AssetServer) {}
 }
 
-impl Asset for Model {
-    type Source<'a> = (
-        &'a str,
-        GltfMesh<'a>,
-        Vec<mere_mesh::Mesh>,
-        &'a wgpu::Device,
-    );
+impl Asset for MeshletMesh {
+    type Source<'a> = (&'a str, u32, mere_mesh::MeshletMesh);
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
-        let (path, model, meshes, device) = source;
-        let default_name = format!("{path}_model_{}", model.index());
-        let name = model.name().unwrap_or(&default_name);
+        let (name, index, mut mesh) = source;
+        let name = format!("{name}_{index}");
 
-        let meshes = model
-            .primitives()
-            .zip(meshes)
-            .map(|(primitive, mere_mesh)| {
-                let material = match primitive.material().name() {
-                    Some(name) => ResourceHandle::from(name),
-                    None => Material::DEFAULT_MATERIAL_ID,
-                };
+        mesh.set_name(name);
 
-                Mesh::from_mere_mesh(name, mere_mesh, &device).with_material(material)
-            })
-            .collect();
+        Ok(mesh)
+    }
 
-        Ok(Self::new(name, meshes))
+    fn finish(&mut self, asset_server: &AssetServer) {
+        let _ = asset_server.send(AssetEvent::MeshletReady(ResourceHandle::from(self.name.as_str())));
     }
 }
 
@@ -116,7 +103,7 @@ impl Asset for Material {
     }
 }
 
-pub fn load_mere_meshes(path: impl AsRef<Path>) -> anyhow::Result<Vec<mere_mesh::Mesh>> {
+pub fn load_mere_meshes(path: impl AsRef<Path>) -> anyhow::Result<Vec<mere_mesh::MeshletMesh>> {
     let model_path = PathBuf::from(PROCESSED_ASSET_DIR)
         .join(path)
         .with_extension("mere");

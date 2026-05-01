@@ -1,55 +1,71 @@
-use crate::{Vertex, util::*};
+use crate::{Vertex, meshlet::Meshlet, util::*};
 use mere_math::{Vec2, Vec3};
-use std::{
-    fs,
-    os::raw::{c_uint, c_void},
-    path::Path,
-};
+use meshopt::VertexDataAdapter;
+use std::{fs, mem, path::Path, sync::Arc};
 
 #[derive(Clone, Debug, Default)]
-pub struct Mesh {
-    pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
+pub struct MeshletMesh {
+    pub name: String,
+    pub vertices: Arc<[Vertex]>,
+    pub meshlet_vertex_indices: Arc<[u32]>,
+    pub meshlet_indices: Arc<[u8]>,
+    pub meshlets: Arc<[Meshlet]>,
 }
 
-impl Mesh {
-    pub fn new(vertices: impl IntoIterator<Item = Vertex>, index_count: usize) -> Self {
+impl MeshletMesh {
+    pub fn new(vertices: impl IntoIterator<Item = Vertex>) -> Self {
         let vertices = vertices.into_iter().collect::<Vec<_>>();
         let (vertex_count, vertex_remap) = meshopt::generate_vertex_remap(&vertices, None);
 
-        let mesh = Self {
-            vertices: vec![Vertex::default(); vertex_count],
-            indices: vec![0; index_count],
-        };
+        let indices = meshopt::remap_index_buffer(None, vertices.len(), &vertex_remap);
+        let vertices = meshopt::remap_vertex_buffer(&vertices, vertex_count, &vertex_remap);
 
-        unsafe {
-            meshopt::ffi::meshopt_remapIndexBuffer(
-                mesh.indices.as_ptr() as *mut c_uint,
-                std::ptr::null(),
-                index_count,
-                vertex_remap.as_ptr() as *const c_uint,
-            );
+        let (meshlet_vertex_indices, meshlet_indices, meshlets) =
+            Self::generate_meshlets(&vertices, &indices);
+
+        Self {
+            name: "".to_string(),
+            vertices: vertices.into(),
+            meshlet_vertex_indices: meshlet_vertex_indices.into(),
+            meshlet_indices: meshlet_indices.into(),
+            meshlets: meshlets.into(),
         }
-
-        unsafe {
-            meshopt::ffi::meshopt_remapVertexBuffer(
-                mesh.vertices.as_ptr() as *mut c_void,
-                vertices.as_ptr() as *const c_void,
-                index_count,
-                size_of::<Vertex>(),
-                vertex_remap.as_ptr() as *const c_uint,
-            );
-        }
-
-        mesh
     }
 
-    pub fn optimize_mesh(&mut self) {
-        let indices = &mut self.indices;
-        let vertices = &mut self.vertices;
-        meshopt::optimize_vertex_cache_in_place(indices, vertices.len());
-        let new_len = meshopt::optimize_vertex_fetch_in_place(indices, vertices);
-        self.vertices.resize_with(new_len, || Vertex::default());
+    fn generate_meshlets(
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) -> (Vec<u32>, Vec<u8>, Vec<Meshlet>) {
+        let meshlets = meshopt::build_meshlets_spatial(
+            &indices,
+            &Self::create_vertex_adapter(&vertices),
+            Meshlet::MAX_VERTICES,
+            Meshlet::MIN_TRIANGLES,
+            Meshlet::MAX_TRIANGLES,
+            Meshlet::FILL_WEIGHT,
+        );
+
+        (
+            meshlets.vertices,
+            meshlets.triangles,
+            meshlets
+                .meshlets
+                .iter()
+                .map(|m| Meshlet {
+                    vertex_offset: m.vertex_offset,
+                    vertex_count: m.vertex_count,
+                    index_offset: m.triangle_offset,
+                    index_count: m.triangle_count * 3,
+                })
+                .collect(),
+        )
+    }
+
+    fn create_vertex_adapter(vertices: &[Vertex]) -> VertexDataAdapter<'_> {
+        let position_offset = mem::offset_of!(Vertex, position);
+        let vertex_stride = size_of::<Vertex>();
+        let vertex_data = meshopt::typed_to_bytes(vertices);
+        VertexDataAdapter::new(vertex_data, vertex_stride, position_offset).unwrap()
     }
 
     pub fn into_mere_file(&self) -> Vec<u8> {
@@ -57,56 +73,74 @@ impl Mesh {
 
         // Write header
         bytes.extend_from_slice(&(self.vertices.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(&(self.indices.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.meshlet_vertex_indices.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.meshlet_indices.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.meshlets.len() as u64).to_le_bytes());
 
         // Write mesh data
         let vertex_bytes = bytemuck::cast_slice(&self.vertices);
         bytes.extend_from_slice(vertex_bytes);
 
-        let index_bytes = bytemuck::cast_slice(&self.indices);
-        bytes.extend_from_slice(index_bytes);
+        let meshlet_vertex_index_bytes = bytemuck::cast_slice(&self.meshlet_vertex_indices);
+        bytes.extend_from_slice(meshlet_vertex_index_bytes);
+
+        let meshlet_index_bytes = bytemuck::cast_slice(&self.meshlet_indices);
+        bytes.extend_from_slice(meshlet_index_bytes);
+
+        let meshlet_bytes = bytemuck::cast_slice(&self.meshlets);
+        bytes.extend_from_slice(meshlet_bytes);
 
         bytes
     }
 
     pub fn from_mere_file<'a>(bytes: &[u8]) -> anyhow::Result<(Self, usize)> {
-        if bytes.len() < 16 {
+        if bytes.len() < 40 {
             anyhow::bail!("File too small to contain header");
         }
 
         // Read Header
         let v_len = u64::from_le_bytes(bytes[0..8].try_into()?) as usize;
-        let i_len = u64::from_le_bytes(bytes[8..16].try_into()?) as usize;
-        let offset = 16;
+        let m_v_i_len = u64::from_le_bytes(bytes[8..16].try_into()?) as usize;
+        let m_i_len = u64::from_le_bytes(bytes[16..24].try_into()?) as usize;
+        let m_len = u64::from_le_bytes(bytes[24..32].try_into()?) as usize;
+        let offset = 32;
 
         // Read mesh data
-        let v_end = offset + v_len * std::mem::size_of::<Vertex>();
-        let i_end = v_end + i_len * std::mem::size_of::<u32>();
+        let v_end = offset + v_len * size_of::<Vertex>();
+        let m_v_i_end = v_end + m_v_i_len * size_of::<u32>();
+        let m_i_end = m_v_i_end + m_i_len * size_of::<u8>();
+        let m_end = m_i_end + m_len * size_of::<Meshlet>();
 
-        if bytes.len() < i_end {
+        if bytes.len() < m_end {
             anyhow::bail!(
                 "File truncated: expected {} bytes, got {}",
-                i_end,
+                m_end,
                 bytes.len()
             );
         }
 
-        let vertices = bytemuck::cast_slice(&bytes[offset..v_end]);
-        let indices = bytemuck::cast_slice(&bytes[v_end..i_end]);
+        let vertices = Arc::from(bytemuck::pod_collect_to_vec(&bytes[offset..v_end]));
+        let meshlet_vertex_indices =
+            Arc::from(bytemuck::pod_collect_to_vec(&bytes[v_end..m_v_i_end]));
+        let meshlet_indices = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_v_i_end..m_i_end]));
+        let meshlets = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_i_end..m_end]));
 
         Ok((
-            Mesh {
-                vertices: vertices.to_vec(),
-                indices: indices.to_vec(),
+            Self {
+                name: "".to_string(),
+                vertices,
+                meshlet_vertex_indices,
+                meshlet_indices,
+                meshlets,
             },
-            i_end,
+            m_end,
         ))
     }
 
     pub fn from_gltf_primitive(
         primitive: gltf::Primitive,
         buffers: &Vec<gltf::buffer::Data>,
-    ) -> Mesh {
+    ) -> Self {
         let reader = primitive.reader(|b| Some(&buffers[b.index()]));
 
         let indices = reader
@@ -164,7 +198,6 @@ impl Mesh {
             }
         };
 
-        let index_count = indices.len();
         let vertices = indices.into_iter().map(|i| {
             let index = i as usize;
             Vertex {
@@ -175,11 +208,15 @@ impl Mesh {
             }
         });
 
-        Self::new(vertices, index_count)
+        Self::new(vertices)
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
     }
 }
 
-pub fn write_mere_file(output_path: &Path, meshes: Vec<Mesh>) -> anyhow::Result<()> {
+pub fn write_mere_file(output_path: &Path, meshes: Vec<MeshletMesh>) -> anyhow::Result<()> {
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -199,14 +236,14 @@ pub fn write_mere_file(output_path: &Path, meshes: Vec<Mesh>) -> anyhow::Result<
     Ok(())
 }
 
-pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<Mesh>> {
+pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MeshletMesh>> {
     let mere_bytes = fs::read(&path)?;
     let mesh_count = u32::from_le_bytes(mere_bytes[0..4].try_into()?) as usize;
 
     let mut offset = 4;
     let mut meshes = Vec::new();
     for _ in 0..mesh_count {
-        let (mesh, read_bytes) = Mesh::from_mere_file(&mere_bytes[offset..])?;
+        let (mesh, read_bytes) = MeshletMesh::from_mere_file(&mere_bytes[offset..])?;
         meshes.push(mesh);
         offset += read_bytes;
     }

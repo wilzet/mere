@@ -23,13 +23,13 @@ impl DebugWindow for EguiRenderer {
 
                 ui.collapsing("Scene", |ui| {
                     ui.collapsing("Objects", |ui| {
-                        for object in scene.objects() {
-                            let model = scene.get_model(object.handle()).unwrap();
+                        for instance in scene.instances() {
+                            let model = scene.get_meshlet_mesh(instance.meshlet).unwrap();
                             ui.label(format!(
                                 "{}\n\tposition: {}\n\trotation: {:?}",
                                 model.read().name,
-                                object.transform.translation,
-                                object.transform.rotation.to_euler(Default::default())
+                                instance.transform.translation,
+                                instance.transform.rotation.to_euler(Default::default())
                             ));
                         }
                     });
