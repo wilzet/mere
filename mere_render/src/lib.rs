@@ -47,6 +47,12 @@ impl State {
             .unwrap()
             .transform
             .translation += Vec3::Y * 2.0;
+        let teapot_2 = scene.load_gltf("utah_teapot", device, queue)?[0];
+        scene
+            .get_instance_mut(teapot_2)
+            .unwrap()
+            .transform
+            .translation += Vec3::X * 10.0;
 
         let mut camera = Camera::new(
             45.0f32.to_radians(),

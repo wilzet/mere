@@ -97,7 +97,6 @@ fn vs_main(
     // Fetch the 32-bit word and shift/mask to get the u8
     let packed_indices = meshlet_indices[word_offset];
     let local_index = (packed_indices >> bit_offset) & 0xFFu;
-    // ---------------------------
 
     let global_index = meshlet_vertex_indices[meshlet.vertex_offset + local_index];
     let v = vertices[global_index];
