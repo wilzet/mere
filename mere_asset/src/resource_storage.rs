@@ -1,4 +1,4 @@
-use crate::{instances::InstanceStorage, meshlets::MeshletStorage};
+use crate::{instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
 
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
@@ -75,33 +75,35 @@ impl ResourceStorage {
         instances: &InstanceStorage,
     ) -> MeshletBindGroups {
         MeshletBindGroups {
-            meshlet_mesh_material_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("meshlet_mesh_material_bind_group"),
-                layout: &device
-                    .create_bind_group_layout(&self.meshlet_mesh_material_bind_group_layout),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: meshlets.vertices.binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: meshlets.vertex_indices.binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: meshlets.indices.binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: meshlets.meshlets.binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: instances.instance_uniforms.binding().unwrap(),
-                    },
-                ],
-            }),
+            meshlet_mesh_material_bind_group: device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("meshlet_mesh_material_bind_group"),
+                    layout: &device
+                        .create_bind_group_layout(&self.meshlet_mesh_material_bind_group_layout),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: meshlets.vertices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: meshlets.vertex_indices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: meshlets.indices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: meshlets.meshlets.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: instances.instance_uniforms.binding().unwrap(),
+                        },
+                    ],
+                },
+            ),
         }
     }
 }

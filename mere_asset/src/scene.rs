@@ -3,10 +3,10 @@ use crate::{
     asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
     camera::Camera,
     handle::ResourceHandle,
-    instances::{Instance, InstanceHandle, InstanceStorage},
+    instance_storage::{Instance, InstanceHandle, InstanceStorage},
     material::Material,
-    meshlets::MeshletStorage,
-    resources::{MeshletBindGroups, ResourceStorage},
+    meshlet_storage::MeshletStorage,
+    resource_storage::{MeshletBindGroups, ResourceStorage},
     texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;

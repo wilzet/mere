@@ -11,17 +11,17 @@ mod asset_server;
 mod camera;
 mod gpu_buffer;
 mod handle;
-mod instances;
+mod instance_storage;
 mod material;
-mod meshlets;
-mod resources;
+mod meshlet_storage;
+mod resource_storage;
 mod scene;
 mod texture;
 
 pub use {
     camera::Camera,
     material::Material,
-    resources::{MeshletBindGroups, ResourceStorage},
+    resource_storage::{MeshletBindGroups, ResourceStorage},
     scene::Scene,
     texture::Texture,
 };

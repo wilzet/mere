@@ -37,7 +37,9 @@ impl Asset for MeshletMesh {
     }
 
     fn finish(&mut self, asset_server: &AssetServer) {
-        let _ = asset_server.send(AssetEvent::MeshletReady(ResourceHandle::from(self.name.as_str())));
+        let _ = asset_server.send(AssetEvent::MeshletReady(ResourceHandle::from(
+            self.name.as_str(),
+        )));
     }
 }
 

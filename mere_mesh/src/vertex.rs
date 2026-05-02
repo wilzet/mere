@@ -1,4 +1,4 @@
-use mere_math::{Vec3};
+use mere_math::Vec3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
