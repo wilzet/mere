@@ -3,7 +3,7 @@ use crate::{
     egui_render::{DebugWindow, EguiRenderer},
     renderer::Renderer,
 };
-use mere_asset::{Camera, Material, Scene};
+use mere_asset::{Camera, Material, World};
 use mere_math::Vec3;
 use std::{sync::Arc, time::Duration};
 use winit::{
@@ -19,7 +19,7 @@ mod lights;
 mod pipeline;
 mod renderer;
 
-pub const CLUSTER_SLOTS: u32 = 1 << 16;
+pub const CLUSTER_SLOTS: u32 = 1 << 20;
 
 pub struct State {
     mere_renderer: Renderer,
@@ -28,27 +28,26 @@ pub struct State {
     lock_cursor: bool,
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
-    scene: Scene,
+    world: World,
 }
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let mere_renderer = Renderer::new(window.clone()).await?;
+        let (mere_renderer, mut world) = Renderer::new(window.clone()).await?;
 
         let (device, queue) = mere_renderer.get_device_queue();
         let config = mere_renderer.get_config();
 
-        let mut scene = Scene::new(device, queue, CLUSTER_SLOTS);
-        //scene.load_gltf("sponza/main_sponza", device, queue)?;
-        //scene.load_gltf("sponza/pkg_a_curtains", device, queue)?;
-        let teapot = scene.load_gltf("utah_teapot", device, queue)?[0];
-        scene
+        //world.load_gltf("sponza/main_sponza", device, queue)?;
+        //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
+        let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
+        world
             .get_instance_mut(teapot)
             .unwrap()
             .transform
             .translation += Vec3::Y * 2.0;
-        let teapot_2 = scene.load_gltf("utah_teapot", device, queue)?[0];
-        scene
+        let teapot_2 = world.load_gltf("utah_teapot", device, queue)?[0];
+        world
             .get_instance_mut(teapot_2)
             .unwrap()
             .transform
@@ -61,8 +60,8 @@ impl State {
             100.0,
             Vec3::new(1.0, 5.0, -5.0),
         );
-        camera.look_at(scene.get_instance(teapot).unwrap().transform.translation);
-        scene.add_camera(camera);
+        camera.look_at(world.get_instance(teapot).unwrap().transform.translation);
+        world.add_camera(camera);
 
         let camera_controller = CameraController::new(5.0, 0.002);
 
@@ -77,7 +76,7 @@ impl State {
             lock_cursor: false,
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
-            scene,
+            world,
         })
     }
 
@@ -85,7 +84,7 @@ impl State {
         if width > 0 && height > 0 {
             self.mere_renderer.resize(width, height);
 
-            self.scene
+            self.world
                 .main_camera_mut()
                 .resize(width as f32 / height as f32);
         }
@@ -194,16 +193,18 @@ impl State {
     pub fn update(&mut self, delta_time: Duration) {
         let dt = delta_time.as_secs_f32();
 
-        self.scene.process_asset_event();
+        self.world.process_asset_event();
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        self.mere_renderer.meshlet_bind_groups =
-            self.scene.prepare_meshlet_resources(device, queue);
+        (
+            self.mere_renderer.meshlet_bind_groups,
+            self.mere_renderer.meshlet_per_frame_resources,
+        ) = self.world.prepare_meshlet_resources(device, queue);
 
         self.camera_controller
-            .update_camera(self.scene.main_camera_mut(), dt);
+            .update_camera(self.world.main_camera_mut(), dt);
         self.mere_renderer
-            .update_main_camera(self.scene.main_camera());
+            .update_main_camera(self.world.main_camera());
         self.mere_renderer.update_light(dt);
     }
 
@@ -216,17 +217,17 @@ impl State {
         let (device, queue) = self.mere_renderer.get_device_queue();
         let config = self.mere_renderer.get_config();
 
-        let material_lock = self.scene.get_material(Material::DEFAULT_MATERIAL_ID);
+        let material_lock = self.world.get_material(Material::DEFAULT_MATERIAL_ID);
         let material = material_lock.read();
 
         self.mere_renderer
-            .render(&view, &mut encoder, self.scene.resources(), &material);
+            .render(&view, &mut encoder, &self.world.instances, &material);
 
         {
             self.egui_renderer.begin_frame(&self.window);
 
             self.egui_renderer
-                .debug_window(&self.window, &self.scene, delta_time);
+                .debug_window(&self.window, &self.world, delta_time);
 
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [config.width, config.height],

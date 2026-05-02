@@ -27,7 +27,7 @@ impl MeshletStorage {
         self.meshlet_mesh_slices.len()
     }
 
-    pub fn queue_upload(&mut self, mesh: &MeshletMesh) {
+    pub fn queue_upload(&mut self, mesh: &mut MeshletMesh) -> u32 {
         let handle = ResourceHandle::from(mesh.name.as_str());
         self.meshlet_mesh_slices.entry(handle).or_insert_with(|| {
             let vertices_slice = self.vertices.queue_write(Arc::clone(&mesh.vertices), ());
@@ -42,6 +42,8 @@ impl MeshletStorage {
                 (vertices_slice.start, indices_slice.start),
             );
 
+            mesh.meshlet_offset = meshlets_slice.start as u32;
+
             [
                 vertices_slice,
                 vertex_indices_slice,
@@ -49,6 +51,8 @@ impl MeshletStorage {
                 meshlets_slice,
             ]
         });
+
+        mesh.meshlet_offset
     }
 
     pub fn remove(&mut self, handle: ResourceHandle<MeshletMesh>) {

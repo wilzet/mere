@@ -1,14 +1,14 @@
 use crate::egui_render::EguiRenderer;
-use mere_asset::Scene;
+use mere_asset::World;
 use std::time::Duration;
 use winit::window::Window;
 
 pub trait DebugWindow {
-    fn debug_window(&mut self, window: &Window, scene: &Scene, delta_time: Duration);
+    fn debug_window(&mut self, window: &Window, world: &World, delta_time: Duration);
 }
 
 impl DebugWindow for EguiRenderer {
-    fn debug_window(&mut self, window: &Window, scene: &Scene, delta_time: Duration) {
+    fn debug_window(&mut self, window: &Window, world: &World, delta_time: Duration) {
         let (width, height): (f64, f64) = window.inner_size().into();
 
         let mut new_scale_factor = self.scale_factor;
@@ -23,8 +23,8 @@ impl DebugWindow for EguiRenderer {
 
                 ui.collapsing("Scene", |ui| {
                     ui.collapsing("Objects", |ui| {
-                        for instance in scene.instances() {
-                            let model = scene.get_meshlet_mesh(instance.meshlet).unwrap();
+                        for instance in world.instances() {
+                            let model = world.get_meshlet_mesh(instance.meshlet).unwrap();
                             ui.label(format!(
                                 "{}\n\tposition: {}\n\trotation: {:?}",
                                 model.read().name,
@@ -34,7 +34,7 @@ impl DebugWindow for EguiRenderer {
                         }
                     });
 
-                    let camera = scene.main_camera();
+                    let camera = world.main_camera();
                     ui.label(format!(
                         "Main Camera\n\tposition: {}\n\trotation: {:?}",
                         camera.transform.translation,

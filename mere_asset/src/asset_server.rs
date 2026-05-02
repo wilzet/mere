@@ -144,7 +144,7 @@ impl AssetServer {
 pub trait Resource<R: Asset> {
     fn get(&self, handle: ResourceHandle<R>) -> Option<Shared<R>>;
     fn add(&mut self, value: R) -> ResourceHandle<R>;
-    fn reserve_handle(&self, handle: ResourceHandle<R>);
+    fn reserve_handle(&self, handle: ResourceHandle<R>) -> bool;
     fn finish(&self, handle: ResourceHandle<R>);
 }
 
@@ -188,11 +188,14 @@ macro_rules! resource_impl {
                 id
             }
 
-            fn reserve_handle(&self, handle: ResourceHandle<$resource>) {
-                self.$storage
-                    .write()
-                    .entry(handle)
-                    .or_insert(AssetState::Loading);
+            fn reserve_handle(&self, handle: ResourceHandle<$resource>) -> bool {
+                matches!(
+                    self.$storage
+                        .write()
+                        .entry(handle)
+                        .or_insert(AssetState::Loading),
+                    AssetState::Ready(_)
+                )
             }
 
             fn finish(&self, handle: ResourceHandle<$resource>) {

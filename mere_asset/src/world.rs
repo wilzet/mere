@@ -1,4 +1,5 @@
 use crate::{
+    PerFrameResources,
     asset::{Asset, GltfAsset, load_gltf_asset, load_mere_meshes},
     asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
     camera::Camera,
@@ -11,27 +12,27 @@ use crate::{
 };
 use mere_common::ASSET_DIR;
 use mere_math::{Quat, Transform};
-use mere_mesh::MeshletMesh;
+use mere_mesh::{Aabb, MeshletMesh};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::path;
 
 #[derive(Debug)]
-pub struct Scene {
+pub struct World {
     cameras: Vec<Camera>,
     asset_server: AssetServer,
-    instances: InstanceStorage,
+    pub instances: InstanceStorage,
     meshlets: MeshletStorage,
     resources: ResourceStorage,
 }
 
-impl Scene {
+impl World {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, cluster_slots: u32) -> Self {
         Self {
             cameras: Vec::new(),
             asset_server: AssetServer::new(device, queue),
             instances: InstanceStorage::new(),
             meshlets: MeshletStorage::new(device),
-            resources: ResourceStorage::new(cluster_slots),
+            resources: ResourceStorage::new(cluster_slots, device),
         }
     }
 
@@ -65,8 +66,9 @@ impl Scene {
             })
             .flat_map(|(model, transform, name)| {
                 model.primitives().map(move |mesh| {
-                    let meshlet_mesh_handle =
-                        ResourceHandle::from(format!("{name}_{}", mesh.index()).as_str());
+                    let meshlet_mesh_handle = ResourceHandle::<MeshletMesh>::from(
+                        format!("{name}_{}", mesh.index()).as_str(),
+                    );
 
                     let material_handle = match mesh.material().name() {
                         Some(name) => ResourceHandle::from(name),
@@ -77,12 +79,28 @@ impl Scene {
                 })
             })
             .map(|(transform, meshlet_mesh_handle, material_handle)| {
-                asset_server_inner.reserve_handle(meshlet_mesh_handle);
+                let mesh_loaded = asset_server_inner.reserve_handle(meshlet_mesh_handle);
+                let (aabb, meshlet_offset, meshlet_count) = if mesh_loaded {
+                    let meshlet_mesh_lock = asset_server_inner.get(meshlet_mesh_handle).unwrap();
+                    let meshlet_mesh = meshlet_mesh_lock.read();
+                    (
+                        meshlet_mesh.aabb,
+                        meshlet_mesh.meshlet_offset,
+                        meshlet_mesh.meshlets.len() as u32,
+                    )
+                } else {
+                    (Aabb::default(), 0, 0)
+                };
+
                 asset_server_inner.reserve_handle(material_handle);
-                self.instances.add_instance(
-                    Instance::new(transform, meshlet_mesh_handle),
+                self.instances.add_instance(Instance::new(
+                    transform,
+                    aabb,
+                    meshlet_mesh_handle,
+                    meshlet_offset,
+                    meshlet_count,
                     material_handle,
-                )
+                ))
             })
             .collect();
 
@@ -105,8 +123,16 @@ impl Scene {
                 AssetEvent::Ready(handle) => self.asset_server.dispatch_ready(handle),
                 AssetEvent::MeshletReady(handle) => {
                     let meshlet_mesh_lock = self.asset_server.get(handle).unwrap();
-                    let meshlet_mesh = meshlet_mesh_lock.read();
-                    self.meshlets.queue_upload(&meshlet_mesh);
+                    let mut meshlet_mesh = meshlet_mesh_lock.write();
+                    let base_offset = self.meshlets.queue_upload(&mut meshlet_mesh);
+
+                    for instance in self.instances.iter_mut() {
+                        if instance.meshlet == handle {
+                            instance.aabb = meshlet_mesh.aabb;
+                            instance.meshlet_offset = base_offset;
+                            instance.meshlet_count = meshlet_mesh.meshlets.len() as u32;
+                        }
+                    }
                 }
             }
         }
@@ -151,22 +177,33 @@ impl Scene {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Option<MeshletBindGroups> {
+    ) -> (Option<MeshletBindGroups>, Option<PerFrameResources>) {
+        self.instances.reset();
+        self.instances.build_instance_buffers();
+
         if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
-            return None;
+            return (None, None);
         }
 
         self.instances.instance_uniforms.write_buffer(device, queue);
+        self.instances.instance_aabbs.write_buffer(device, queue);
+        self.instances
+            .instance_meshlet_offsets
+            .write_buffer(device, queue);
+        self.instances
+            .instance_meshlet_counts
+            .write_buffer(device, queue);
         self.instances
             .instance_material_ids
             .write_buffer(device, queue);
 
         self.meshlets.perform_pending_uploads(device, queue);
 
-        Some(
+        let (bind_groups, per_frame_resources) =
             self.resources
-                .bind_groups(device, &self.meshlets, &self.instances),
-        )
+                .bind_groups(device, &self.meshlets, &self.instances);
+
+        (Some(bind_groups), Some(per_frame_resources))
     }
 
     pub fn resources(&self) -> &ResourceStorage {

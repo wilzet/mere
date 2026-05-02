@@ -3,7 +3,7 @@
 //! Provides core data structures used at runtime:
 //! - Models and meshes
 //! - Materials and textures
-//! - Scene and objects
+//! - World and objects
 //! - Camera
 
 mod asset;
@@ -15,13 +15,14 @@ mod instance_storage;
 mod material;
 mod meshlet_storage;
 mod resource_storage;
-mod scene;
 mod texture;
+mod world;
 
 pub use {
     camera::Camera,
+    instance_storage::InstanceStorage,
     material::Material,
-    resource_storage::{MeshletBindGroups, ResourceStorage},
-    scene::Scene,
+    resource_storage::{MeshletBindGroups, PerFrameResources, ResourceStorage},
     texture::Texture,
+    world::World,
 };

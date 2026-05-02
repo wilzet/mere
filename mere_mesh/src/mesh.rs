@@ -1,4 +1,8 @@
-use crate::{Vertex, meshlet::Meshlet, util::*};
+use crate::{
+    Vertex,
+    meshlet::{BoundingSphere, Meshlet},
+    util::*,
+};
 use mere_math::{Vec2, Vec3};
 use meshopt::VertexDataAdapter;
 use std::{fs, mem, path::Path, sync::Arc};
@@ -10,6 +14,8 @@ pub struct MeshletMesh {
     pub meshlet_vertex_indices: Arc<[u32]>,
     pub meshlet_indices: Arc<[u8]>,
     pub meshlets: Arc<[Meshlet]>,
+    pub aabb: Aabb,
+    pub meshlet_offset: u32,
 }
 
 impl MeshletMesh {
@@ -20,6 +26,8 @@ impl MeshletMesh {
         let indices = meshopt::remap_index_buffer(None, vertices.len(), &vertex_remap);
         let vertices = meshopt::remap_vertex_buffer(&vertices, vertex_count, &vertex_remap);
 
+        let aabb = Aabb::from_vertices(&vertices);
+
         let (meshlet_vertex_indices, meshlet_indices, meshlets) =
             Self::generate_meshlets(&vertices, &indices);
 
@@ -29,6 +37,8 @@ impl MeshletMesh {
             meshlet_vertex_indices: meshlet_vertex_indices.into(),
             meshlet_indices: meshlet_indices.into(),
             meshlets: meshlets.into(),
+            aabb,
+            meshlet_offset: 0,
         }
     }
 
@@ -36,29 +46,36 @@ impl MeshletMesh {
         vertices: &[Vertex],
         indices: &[u32],
     ) -> (Vec<u32>, Vec<u8>, Vec<Meshlet>) {
+        let vertex_adapter = &Self::create_vertex_adapter(&vertices);
         let meshlets = meshopt::build_meshlets_spatial(
             &indices,
-            &Self::create_vertex_adapter(&vertices),
+            vertex_adapter,
             Meshlet::MAX_VERTICES,
             Meshlet::MIN_TRIANGLES,
             Meshlet::MAX_TRIANGLES,
             Meshlet::FILL_WEIGHT,
         );
 
-        (
-            meshlets.vertices,
-            meshlets.triangles,
-            meshlets
-                .meshlets
-                .iter()
-                .map(|m| Meshlet {
-                    vertex_offset: m.vertex_offset,
-                    vertex_count: m.vertex_count,
-                    index_offset: m.triangle_offset,
-                    index_count: m.triangle_count * 3,
-                })
-                .collect(),
-        )
+        let bounds = meshlets.iter().map(|m| {
+            let bounds = meshopt::compute_meshlet_bounds(m, vertex_adapter);
+            BoundingSphere::new(bounds.center.into(), bounds.radius)
+        });
+
+        let mere_meshlets = meshlets
+            .meshlets
+            .iter()
+            .zip(bounds)
+            .map(|(meshlet, bounds)| Meshlet {
+                vertex_offset: meshlet.vertex_offset,
+                vertex_count: meshlet.vertex_count,
+                index_offset: meshlet.triangle_offset,
+                index_count: meshlet.triangle_count * 3,
+                bounds,
+                parent_bounds: BoundingSphere::new(bounds.center, f32::NEG_INFINITY),
+            })
+            .collect();
+
+        (meshlets.vertices, meshlets.triangles, mere_meshlets)
     }
 
     fn create_vertex_adapter(vertices: &[Vertex]) -> VertexDataAdapter<'_> {
@@ -125,6 +142,8 @@ impl MeshletMesh {
         let meshlet_indices = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_v_i_end..m_i_end]));
         let meshlets = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_i_end..m_end]));
 
+        let aabb = Aabb::from_vertices(&vertices);
+
         Ok((
             Self {
                 name: "".to_string(),
@@ -132,6 +151,8 @@ impl MeshletMesh {
                 meshlet_vertex_indices,
                 meshlet_indices,
                 meshlets,
+                aabb,
+                meshlet_offset: 0,
             },
             m_end,
         ))
@@ -249,4 +270,33 @@ pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MeshletMesh>> {
     }
 
     Ok(meshes)
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+#[repr(C)]
+pub struct Aabb {
+    center: Vec3,
+    extents: Vec3,
+}
+
+unsafe impl bytemuck::Zeroable for Aabb {}
+unsafe impl bytemuck::Pod for Aabb {}
+
+impl Aabb {
+    pub fn new(center: Vec3, extents: Vec3) -> Self {
+        Self { center, extents }
+    }
+
+    pub fn from_vertices(vertices: &[Vertex]) -> Self {
+        let (min, max) = vertices
+            .iter()
+            .fold((Vec3::MAX, Vec3::MIN), |(min, max), v| {
+                (min.min(v.position), max.max(v.position))
+            });
+
+        let center = (min + max) * 0.5;
+        let extents = max - min;
+
+        Self { center, extents }
+    }
 }

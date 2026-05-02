@@ -1,7 +1,12 @@
 use crate::{
-    CLUSTER_SLOTS, camera::CameraUniform, lights::LightUniform, pipeline::create_render_pipeline,
+    CLUSTER_SLOTS,
+    camera::CameraUniform,
+    lights::LightUniform,
+    pipeline::{create_compute_pipeline, create_render_pipeline},
 };
-use mere_asset::{Camera, Material, MeshletBindGroups, ResourceStorage, Texture};
+use mere_asset::{
+    Camera, InstanceStorage, Material, MeshletBindGroups, PerFrameResources, Texture, World,
+};
 use mere_math::{Quat, Vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -13,7 +18,9 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
-    render_pipeline: wgpu::RenderPipeline,
+    instance_cull_pipeline: wgpu::ComputePipeline,
+    cluster_cull_pipeline: wgpu::ComputePipeline,
+    raster_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     bg_color: wgpu::Color,
     main_camera_uniform: CameraUniform,
@@ -23,14 +30,15 @@ pub struct Renderer {
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     pub meshlet_bind_groups: Option<MeshletBindGroups>,
+    pub meshlet_per_frame_resources: Option<PerFrameResources>,
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+    pub async fn new(window: Arc<Window>) -> anyhow::Result<(Self, World)> {
         let size = window.inner_size();
         mere_log::info!("Initializing WGPU ({}x{})", size.width, size.height);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let gpu_instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
@@ -38,9 +46,9 @@ impl Renderer {
             display: None,
         });
 
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = gpu_instance.create_surface(window.clone()).unwrap();
 
-        let adapter = instance
+        let adapter = gpu_instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
@@ -62,6 +70,8 @@ impl Renderer {
                 trace: wgpu::Trace::Off,
             })
             .await?;
+
+        let world = World::new(&device, &queue, CLUSTER_SLOTS);
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -157,56 +167,90 @@ impl Renderer {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+        let instance_cull_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("instance_cull_pipeline_layout"),
+                bind_group_layouts: &[Some(&world.resources().instance_cull_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("instance_cull_pipeline"),
+                &device,
+                Some(&layout),
+                wgpu::include_wgsl!("cull_instances.wgsl"),
+                "cull_instances",
+            )
+        };
+
+        let cluster_cull_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("cluster_cull_pipeline_layout"),
+                bind_group_layouts: &[Some(&world.resources().cluster_cull_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("cluster_cull_pipeline"),
+                &device,
+                Some(&layout),
+                wgpu::include_wgsl!("cull_clusters.wgsl"),
+                "cull_clusters",
+            )
+        };
+
+        let raster_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("raster_pipeline_layout"),
                 bind_group_layouts: &[
                     Some(&camera_bind_group_layout),
                     Some(&light_bind_group_layout),
                     Some(Material::material_bind_group_layout(&device)),
-                    Some(
-                        &device.create_bind_group_layout(
-                            &ResourceStorage::new(CLUSTER_SLOTS)
-                                .meshlet_mesh_material_bind_group_layout,
-                        ),
-                    ),
+                    Some(&world.resources().meshlet_mesh_material_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
 
-        let render_pipeline = create_render_pipeline(
-            Some("Render Pipeline"),
-            &device,
-            &render_pipeline_layout,
-            config.format,
-            Some(Texture::DEPTH_FORMAT),
-            &[],
-            Some(wgpu::BlendState::REPLACE),
-            wgpu::include_wgsl!("meshlet_debug.wgsl"),
-        );
+            create_render_pipeline(
+                Some("raster_pipeline"),
+                &device,
+                &layout,
+                config.format,
+                Some(Texture::DEPTH_FORMAT),
+                &[],
+                Some(wgpu::BlendState::REPLACE),
+                wgpu::include_wgsl!("meshlet_debug.wgsl"),
+            )
+        };
 
-        Ok(Self {
-            surface,
-            device,
-            queue,
-            config,
-            is_surface_configured: false,
-            render_pipeline,
-            depth_texture,
-            bg_color: wgpu::Color {
-                r: 0.1,
-                g: 0.2,
-                b: 0.3,
-                a: 1.0,
+        Ok((
+            Self {
+                surface,
+                device,
+                queue,
+                config,
+                is_surface_configured: false,
+                instance_cull_pipeline,
+                cluster_cull_pipeline,
+                raster_pipeline,
+                depth_texture,
+                bg_color: wgpu::Color {
+                    r: 0.1,
+                    g: 0.2,
+                    b: 0.3,
+                    a: 1.0,
+                },
+                main_camera_uniform,
+                main_camera_buffer,
+                main_camera_bind_group,
+                light_uniform,
+                light_buffer,
+                light_bind_group,
+                meshlet_bind_groups: None,
+                meshlet_per_frame_resources: None,
             },
-            main_camera_uniform,
-            main_camera_buffer,
-            main_camera_bind_group,
-            light_uniform,
-            light_buffer,
-            light_bind_group,
-            meshlet_bind_groups: None,
-        })
+            world,
+        ))
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -301,50 +345,83 @@ impl Renderer {
         &self,
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
-        resources: &ResourceStorage,
+        instances: &InstanceStorage,
         material: &Material,
     ) {
-        let Some(meshlet_bind_groups) = self.meshlet_bind_groups.as_ref() else {
+        let (Some(meshlet_bind_groups), Some(per_frame_resources)) = (
+            self.meshlet_bind_groups.as_ref(),
+            self.meshlet_per_frame_resources.as_ref(),
+        ) else {
             return;
         };
 
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.bg_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth_texture.view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
+        {
+            let mut instance_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("instance_cull_pass"),
+                timestamp_writes: None,
+            });
+            instance_cull_pass.set_pipeline(&self.instance_cull_pipeline);
+            instance_cull_pass.set_bind_group(
+                0,
+                Some(&meshlet_bind_groups.instance_cull_bind_group),
+                &[],
+            );
+            instance_cull_pass.dispatch_workgroups(instances.scene_instance_count, 1, 1);
+        }
+
+        {
+            let mut cluster_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cluster_cull_pass"),
+                timestamp_writes: None,
+            });
+            cluster_cull_pass.set_pipeline(&self.cluster_cull_pipeline);
+            cluster_cull_pass.set_bind_group(
+                0,
+                Some(&meshlet_bind_groups.cluster_cull_bind_group),
+                &[],
+            );
+
+            let cluster_count = instances.count_clusters();
+
+            cluster_cull_pass.dispatch_workgroups(cluster_count as u32, 1, 1);
+        }
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("raster_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.bg_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-            occlusion_query_set: None,
-            timestamp_writes: None,
-            multiview_mask: None,
-        });
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
 
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.main_camera_bind_group, &[]);
-        render_pass.set_bind_group(1, &self.light_bind_group, &[]);
-        render_pass.set_bind_group(2, &material.bind_group, &[]);
-        render_pass.set_bind_group(
-            3,
-            &meshlet_bind_groups.meshlet_mesh_material_bind_group,
-            &[],
-        );
+            render_pass.set_pipeline(&self.raster_pipeline);
+            render_pass.set_bind_group(0, &self.main_camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.light_bind_group, &[]);
+            render_pass.set_bind_group(2, &material.bind_group, &[]);
+            render_pass.set_bind_group(
+                3,
+                &meshlet_bind_groups.meshlet_mesh_material_bind_group,
+                &[],
+            );
 
-        render_pass.draw(
-            0..mere_mesh::Meshlet::MAX_INDICES_PER_MESHLET,
-            0..resources.rightmost_slot,
-        );
+            render_pass.draw_indirect(&per_frame_resources.indirect_args, 0);
+        }
     }
 }

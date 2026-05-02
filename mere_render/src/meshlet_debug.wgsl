@@ -17,11 +17,8 @@ struct MaterialProperties {
 
 // --- Vertex shader ---
 
-@group(0) @binding(0)
-var<uniform> camera: Camera;
-
-@group(1) @binding(0)
-var<uniform> light: Light;
+@group(0) @binding(0) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> light: Light;
 
 struct Vertex {
     position: array<f32, 3>,
@@ -30,34 +27,39 @@ struct Vertex {
     tangent: u32,
 }
 
+struct BoundingSphere {
+    center_radius: vec4<f32>,
+}
+
 struct Meshlet {
     vertex_offset: u32,
     vertex_count: u32,
     index_offset: u32,
     index_count: u32,
+    bounds: BoundingSphere,
+    parent_bounds: BoundingSphere,
 }
 
-struct Instance {
+struct MeshUniform {
     model_matrix: mat4x4<f32>,
+    previous_model: mat4x4<f32>,
     normal_matrix_0: vec3<f32>,
     normal_matrix_1: vec3<f32>,
     normal_matrix_2: vec3<f32>,
 }
 
-@group(3) @binding(0)
-var<storage, read> vertices: array<Vertex>;
+struct ClusterInfo {
+    instance_id: u32,
+    meshlet_id: u32,
+}
 
-@group(3) @binding(1)
-var<storage, read> meshlet_vertex_indices: array<u32>;
+@group(3) @binding(0) var<storage, read> vertices: array<Vertex>;
+@group(3) @binding(1) var<storage, read> meshlet_vertex_indices: array<u32>;
+@group(3) @binding(2) var<storage, read> meshlet_indices: array<u32>;
 
-@group(3) @binding(2)
-var<storage, read> meshlet_indices: array<u32>;
-
-@group(3) @binding(3)
-var<storage, read> meshlets: array<Meshlet>;
-
-@group(3) @binding(4)
-var<storage, read> instances: array<Instance>;
+@group(3) @binding(3) var<storage, read> meshlets: array<Meshlet>;
+@group(3) @binding(4) var<storage, read> instances: array<MeshUniform>;
+@group(3) @binding(5) var<storage, read> cluster_info: array<ClusterInfo>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -75,14 +77,18 @@ fn hash_color(id: u32) -> vec3<f32> {
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) vid: u32,
-    @builtin(instance_index) iid: u32,
+    @builtin(vertex_index) vertex_id: u32,
+    @builtin(instance_index) cluster_id: u32,
 ) -> VertexOutput {
-    let meshlet = meshlets[iid];
-    let instance = instances[0];
+    let info = cluster_info[cluster_id];
+    let instance_id = info.instance_id;
+    let meshlet_id = info.meshlet_id;
+    
+    let instance = instances[instance_id];
+    let meshlet = meshlets[meshlet_id];
 
     // guard against overflow (important!)
-    if vid >= meshlet.index_count {
+    if vertex_id >= meshlet.index_count {
         // push off-screen
         var out: VertexOutput;
         out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -90,7 +96,7 @@ fn vs_main(
         return out;
     }
 
-    let byte_offset = meshlet.index_offset + vid;
+    let byte_offset = meshlet.index_offset + vertex_id;
     let word_offset = byte_offset / 4u;
     let bit_offset = (byte_offset % 4u) * 8u;
 
@@ -108,27 +114,20 @@ fn vs_main(
     out.clip_position = camera.view_proj * world_position;
 
     // DEBUG: color per meshlet
-    out.color = hash_color(iid);
+    out.color = hash_color(cluster_id);
 
     return out;
 }
 
 // --- Fragment Shader ---
 
-@group(2) @binding(0)
-var t_diffuse: texture_2d<f32>;
-@group(2) @binding(1)
-var s_diffuse: sampler;
-@group(2) @binding(2)
-var t_normal: texture_2d<f32>;
-@group(2) @binding(3)
-var s_normal: sampler;
-@group(2) @binding(4)
-var t_rough_metal: texture_2d<f32>;
-@group(2) @binding(5)
-var s_rough_metal: sampler;
-@group(2) @binding(6)
-var<uniform> properties: MaterialProperties;
+@group(2) @binding(0) var t_diffuse: texture_2d<f32>;
+@group(2) @binding(1) var s_diffuse: sampler;
+@group(2) @binding(2) var t_normal: texture_2d<f32>;
+@group(2) @binding(3) var s_normal: sampler;
+@group(2) @binding(4) var t_rough_metal: texture_2d<f32>;
+@group(2) @binding(5) var s_rough_metal: sampler;
+@group(2) @binding(6) var<uniform> properties: MaterialProperties;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {

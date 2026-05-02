@@ -50,3 +50,22 @@ pub fn create_render_pipeline(
         cache: None,
     })
 }
+
+pub fn create_compute_pipeline(
+    label: Option<&str>,
+    device: &wgpu::Device,
+    layout: Option<&wgpu::PipelineLayout>,
+    shader: wgpu::ShaderModuleDescriptor,
+    entry_point: &str,
+) -> wgpu::ComputePipeline {
+    let shader = device.create_shader_module(shader);
+
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label,
+        layout,
+        module: &shader,
+        entry_point: Some(entry_point),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    })
+}
