@@ -40,18 +40,16 @@ impl State {
 
         //world.load_gltf("sponza/main_sponza", device, queue)?;
         //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
-        let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
-        world
-            .get_instance_mut(teapot)
-            .unwrap()
-            .transform
-            .translation += Vec3::Y * 2.0;
-        let teapot_2 = world.load_gltf("utah_teapot", device, queue)?[0];
-        world
-            .get_instance_mut(teapot_2)
-            .unwrap()
-            .transform
-            .translation += Vec3::X * 10.0;
+        for x in 0..10 {
+            for y in 0..10 {
+                let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
+                world
+                    .get_instance_mut(teapot)
+                    .unwrap()
+                    .transform
+                    .translation += Vec3::X * 6.0 * x as f32 + Vec3::Z * 6.0 * y as f32;
+            }
+        }
 
         let mut camera = Camera::new(
             45.0f32.to_radians(),
@@ -60,7 +58,7 @@ impl State {
             100.0,
             Vec3::new(1.0, 5.0, -5.0),
         );
-        camera.look_at(world.get_instance(teapot).unwrap().transform.translation);
+        camera.look_at(Vec3::ZERO);
         world.add_camera(camera);
 
         let camera_controller = CameraController::new(5.0, 0.002);
@@ -196,10 +194,7 @@ impl State {
         self.world.process_asset_event();
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        (
-            self.mere_renderer.meshlet_bind_groups,
-            self.mere_renderer.meshlet_per_frame_resources,
-        ) = self.world.prepare_meshlet_resources(device, queue);
+        self.world.prepare_meshlet_resources(device, queue);
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
@@ -220,8 +215,13 @@ impl State {
         let material_lock = self.world.get_material(Material::DEFAULT_MATERIAL_ID);
         let material = material_lock.read();
 
-        self.mere_renderer
-            .render(&view, &mut encoder, &self.world.instances, &material);
+        self.mere_renderer.render(
+            &view,
+            &mut encoder,
+            self.world.instances(),
+            self.world.resources(),
+            &material,
+        );
 
         {
             self.egui_renderer.begin_frame(&self.window);

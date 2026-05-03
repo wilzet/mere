@@ -4,9 +4,7 @@ use crate::{
     lights::LightUniform,
     pipeline::{create_compute_pipeline, create_render_pipeline},
 };
-use mere_asset::{
-    Camera, InstanceStorage, Material, MeshletBindGroups, PerFrameResources, Texture, World,
-};
+use mere_asset::{Camera, InstanceStorage, Material, ResourceStorage, Texture, World};
 use mere_math::{Quat, Vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -29,8 +27,6 @@ pub struct Renderer {
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
-    pub meshlet_bind_groups: Option<MeshletBindGroups>,
-    pub meshlet_per_frame_resources: Option<PerFrameResources>,
 }
 
 impl Renderer {
@@ -246,8 +242,6 @@ impl Renderer {
                 light_uniform,
                 light_buffer,
                 light_bind_group,
-                meshlet_bind_groups: None,
-                meshlet_per_frame_resources: None,
             },
             world,
         ))
@@ -346,12 +340,10 @@ impl Renderer {
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
         instances: &InstanceStorage,
+        resources: &ResourceStorage,
         material: &Material,
     ) {
-        let (Some(meshlet_bind_groups), Some(per_frame_resources)) = (
-            self.meshlet_bind_groups.as_ref(),
-            self.meshlet_per_frame_resources.as_ref(),
-        ) else {
+        let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
             return;
         };
 
@@ -363,7 +355,7 @@ impl Renderer {
             instance_cull_pass.set_pipeline(&self.instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
-                Some(&meshlet_bind_groups.instance_cull_bind_group),
+                Some(&per_frame_resources.bind_groups.instance_cull_bind_group),
                 &[],
             );
             instance_cull_pass.dispatch_workgroups(instances.scene_instance_count, 1, 1);
@@ -377,11 +369,11 @@ impl Renderer {
             cluster_cull_pass.set_pipeline(&self.cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
-                Some(&meshlet_bind_groups.cluster_cull_bind_group),
+                Some(&per_frame_resources.bind_groups.cluster_cull_bind_group),
                 &[],
             );
 
-            let cluster_count = instances.count_clusters();
+            let cluster_count = instances.count_clusters().div_ceil(128);
 
             cluster_cull_pass.dispatch_workgroups(cluster_count as u32, 1, 1);
         }
@@ -417,7 +409,9 @@ impl Renderer {
             render_pass.set_bind_group(2, &material.bind_group, &[]);
             render_pass.set_bind_group(
                 3,
-                &meshlet_bind_groups.meshlet_mesh_material_bind_group,
+                &per_frame_resources
+                    .bind_groups
+                    .meshlet_mesh_material_bind_group,
                 &[],
             );
 

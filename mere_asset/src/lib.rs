@@ -19,10 +19,6 @@ mod texture;
 mod world;
 
 pub use {
-    camera::Camera,
-    instance_storage::InstanceStorage,
-    material::Material,
-    resource_storage::{MeshletBindGroups, PerFrameResources, ResourceStorage},
-    texture::Texture,
-    world::World,
+    camera::Camera, instance_storage::InstanceStorage, material::Material,
+    resource_storage::ResourceStorage, texture::Texture, world::World,
 };

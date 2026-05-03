@@ -1,6 +1,7 @@
 use egui::Context;
 use egui_wgpu::Renderer;
 use egui_winit::State;
+use std::collections::VecDeque;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
@@ -13,6 +14,7 @@ pub struct EguiRenderer {
     renderer: Renderer,
     frame_started: bool,
     scale_factor: f32,
+    fps_history: VecDeque<f32>,
 }
 
 impl EguiRenderer {
@@ -57,6 +59,7 @@ impl EguiRenderer {
             renderer: egui_renderer,
             frame_started: false,
             scale_factor: 1.0,
+            fps_history: VecDeque::new(),
         }
     }
 

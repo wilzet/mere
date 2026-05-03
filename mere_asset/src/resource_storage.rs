@@ -6,6 +6,8 @@ use wgpu::util::DeviceExt;
 pub struct ResourceStorage {
     pub cluster_info: wgpu::Buffer,
 
+    pub meshlet_per_frame_resources: Option<PerFrameResources>,
+
     pub rightmost_slot: u32,
     pub instance_cull_bind_group_layout: wgpu::BindGroupLayout,
     pub cluster_cull_bind_group_layout: wgpu::BindGroupLayout,
@@ -21,6 +23,7 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }),
+            meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
             instance_cull_bind_group_layout: device.create_bind_group_layout(
                 &wgpu::BindGroupLayoutDescriptor {
@@ -60,124 +63,115 @@ impl ResourceStorage {
         }
     }
 
-    pub fn bind_groups(
-        &self,
+    pub fn generate_frame_resources(
+        &mut self,
         device: &wgpu::Device,
         meshlets: &MeshletStorage,
         instances: &InstanceStorage,
-    ) -> (MeshletBindGroups, PerFrameResources) {
-        let per_frame_resources = PerFrameResources {
-            visible_instance_cluster_count: device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("visible_instance_cluster_count"),
-                    contents: bytemuck::bytes_of(&0u32),
-                    usage: wgpu::BufferUsages::STORAGE,
-                },
-            ),
-            indirect_args: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("indirect_args"),
-                contents: wgpu::util::DrawIndirectArgs {
-                    vertex_count: 3 * Meshlet::MAX_VERTICES as u32,
-                    instance_count: 0,
-                    first_vertex: 0,
-                    first_instance: 0,
-                }
-                .as_bytes(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
-            }),
-        };
+    ) {
+        let visible_instance_cluster_count =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("visible_instance_cluster_count"),
+                contents: bytemuck::bytes_of(&0u32),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
 
-        (
-            MeshletBindGroups {
-                instance_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("instance_cull_bind_group"),
-                    layout: &self.instance_cull_bind_group_layout,
+        let indirect_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("indirect_args"),
+            contents: wgpu::util::DrawIndirectArgs {
+                vertex_count: Meshlet::MAX_TRIANGLES as u32,
+                instance_count: 0,
+                first_vertex: 0,
+                first_instance: 0,
+            }
+            .as_bytes(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+        });
+
+        let bind_groups = MeshletBindGroups {
+            instance_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("instance_cull_bind_group"),
+                layout: &self.instance_cull_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: instances.instance_aabbs.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: instances.instance_meshlet_offsets.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: instances.instance_meshlet_counts.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                ],
+            }),
+            cluster_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cluster_cull_bind_group"),
+                layout: &self.cluster_cull_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: meshlets.meshlets.binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: indirect_args.as_entire_binding(),
+                    },
+                ],
+            }),
+            meshlet_mesh_material_bind_group: device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("meshlet_mesh_material_bind_group"),
+                    layout: &self.meshlet_mesh_material_bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: instances.instance_aabbs.binding().unwrap(),
+                            resource: meshlets.vertices.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: instances.instance_meshlet_offsets.binding().unwrap(),
+                            resource: meshlets.vertex_indices.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: instances.instance_meshlet_counts.binding().unwrap(),
+                            resource: meshlets.indices.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: per_frame_resources
-                                .visible_instance_cluster_count
-                                .as_entire_binding(),
-                        },
-                    ],
-                }),
-                cluster_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("cluster_cull_bind_group"),
-                    layout: &self.cluster_cull_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
                             resource: meshlets.meshlets.binding(),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: per_frame_resources.indirect_args.as_entire_binding(),
+                            binding: 4,
+                            resource: instances.instance_uniforms.binding().unwrap(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: self.cluster_info.as_entire_binding(),
                         },
                     ],
-                }),
-                meshlet_mesh_material_bind_group: device.create_bind_group(
-                    &wgpu::BindGroupDescriptor {
-                        label: Some("meshlet_mesh_material_bind_group"),
-                        layout: &self.meshlet_mesh_material_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: meshlets.vertices.binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: meshlets.vertex_indices.binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: meshlets.indices.binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: meshlets.meshlets.binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: instances.instance_uniforms.binding().unwrap(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: self.cluster_info.as_entire_binding(),
-                            },
-                        ],
-                    },
-                ),
-            },
-            per_frame_resources,
-        )
-    }
-}
+                },
+            ),
+        };
 
-const fn storage_buffer(read_only: bool) -> wgpu::BindingType {
-    wgpu::BindingType::Buffer {
-        ty: wgpu::BufferBindingType::Storage { read_only },
-        has_dynamic_offset: false,
-        min_binding_size: None,
+        self.meshlet_per_frame_resources = Some(PerFrameResources {
+            visible_instance_cluster_count,
+            indirect_args,
+            bind_groups,
+        });
     }
 }
 
@@ -189,18 +183,25 @@ const fn storage_buffer_layout_entry(
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility,
-        ty: storage_buffer(read_only),
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
         count: None,
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MeshletBindGroups {
     pub instance_cull_bind_group: wgpu::BindGroup,
     pub cluster_cull_bind_group: wgpu::BindGroup,
     pub meshlet_mesh_material_bind_group: wgpu::BindGroup,
 }
 
+#[derive(Clone, Debug)]
 pub struct PerFrameResources {
     pub visible_instance_cluster_count: wgpu::Buffer,
     pub indirect_args: wgpu::Buffer,
+    pub bind_groups: MeshletBindGroups,
 }

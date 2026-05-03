@@ -89,6 +89,8 @@ impl InstanceStorage {
 
         self.instance_uniforms.get_mut().clear();
         self.instance_aabbs.get_mut().clear();
+        self.instance_meshlet_offsets.get_mut().clear();
+        self.instance_meshlet_counts.get_mut().clear();
         self.instance_material_ids.get_mut().clear();
     }
 }

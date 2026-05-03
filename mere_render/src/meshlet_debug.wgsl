@@ -77,7 +77,7 @@ fn hash_color(id: u32) -> vec3<f32> {
 
 @vertex
 fn vs_main(
-    @builtin(vertex_index) vertex_id: u32,
+    @builtin(vertex_index) index_id: u32,
     @builtin(instance_index) cluster_id: u32,
 ) -> VertexOutput {
     let info = cluster_info[cluster_id];
@@ -88,7 +88,7 @@ fn vs_main(
     let meshlet = meshlets[meshlet_id];
 
     // guard against overflow (important!)
-    if vertex_id >= meshlet.index_count {
+    if index_id >= meshlet.index_count {
         // push off-screen
         var out: VertexOutput;
         out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -96,7 +96,7 @@ fn vs_main(
         return out;
     }
 
-    let byte_offset = meshlet.index_offset + vertex_id;
+    let byte_offset = meshlet.index_offset + index_id;
     let word_offset = byte_offset / 4u;
     let bit_offset = (byte_offset % 4u) * 8u;
 
@@ -114,7 +114,7 @@ fn vs_main(
     out.clip_position = camera.view_proj * world_position;
 
     // DEBUG: color per meshlet
-    out.color = hash_color(cluster_id);
+    out.color = hash_color(meshlet_id);
 
     return out;
 }

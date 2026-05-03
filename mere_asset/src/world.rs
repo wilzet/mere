@@ -1,5 +1,4 @@
 use crate::{
-    PerFrameResources,
     asset::{Asset, GltfAsset, load_gltf_asset, load_mere_meshes},
     asset_server::{AssetEvent, AssetServer, DefaultResource, Resource, Shared},
     camera::Camera,
@@ -7,7 +6,7 @@ use crate::{
     instance_storage::{Instance, InstanceHandle, InstanceStorage},
     material::Material,
     meshlet_storage::MeshletStorage,
-    resource_storage::{MeshletBindGroups, ResourceStorage},
+    resource_storage::ResourceStorage,
     texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
@@ -20,7 +19,7 @@ use std::path;
 pub struct World {
     cameras: Vec<Camera>,
     asset_server: AssetServer,
-    pub instances: InstanceStorage,
+    instances: InstanceStorage,
     meshlets: MeshletStorage,
     resources: ResourceStorage,
 }
@@ -138,8 +137,12 @@ impl World {
         }
     }
 
-    pub fn instances(&self) -> slotmap::dense::Values<'_, InstanceHandle, Instance> {
+    pub fn iter_instances(&self) -> slotmap::dense::Values<'_, InstanceHandle, Instance> {
         self.instances.iter()
+    }
+
+    pub fn instances(&self) -> &InstanceStorage {
+        &self.instances
     }
 
     pub fn add_camera(&mut self, camera: Camera) -> usize {
@@ -173,16 +176,12 @@ impl World {
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
 
-    pub fn prepare_meshlet_resources(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> (Option<MeshletBindGroups>, Option<PerFrameResources>) {
+    pub fn prepare_meshlet_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         self.instances.reset();
         self.instances.build_instance_buffers();
 
         if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
-            return (None, None);
+            return;
         }
 
         self.instances.instance_uniforms.write_buffer(device, queue);
@@ -199,11 +198,8 @@ impl World {
 
         self.meshlets.perform_pending_uploads(device, queue);
 
-        let (bind_groups, per_frame_resources) =
-            self.resources
-                .bind_groups(device, &self.meshlets, &self.instances);
-
-        (Some(bind_groups), Some(per_frame_resources))
+        self.resources
+            .generate_frame_resources(device, &self.meshlets, &self.instances);
     }
 
     pub fn resources(&self) -> &ResourceStorage {
