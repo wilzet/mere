@@ -1,4 +1,4 @@
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 use std::ops::Mul;
 
 /// TRS transform in 3D space (translation, rotation, scale).
@@ -91,6 +91,11 @@ impl Transform {
     #[inline]
     pub fn right(&self) -> Vec3 {
         self.rotation * Vec3::X
+    }
+
+    #[inline]
+    pub fn euler_angles(&self) -> Vec3 {
+        self.rotation.to_euler(EulerRot::XYZ).into()
     }
 }
 

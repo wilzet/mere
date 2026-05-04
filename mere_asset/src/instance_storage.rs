@@ -1,4 +1,8 @@
-use crate::{gpu_buffer::GpuStorageBuffer, handle::ResourceHandle, material::Material};
+use crate::{
+    gpu_buffer::{GpuBufferable, GpuStorageBuffer},
+    handle::ResourceHandle,
+    material::Material,
+};
 use mere_math::Transform;
 use mere_mesh::{Aabb, MeshletMesh};
 use slotmap::DenseSlotMap;
@@ -92,6 +96,25 @@ impl InstanceStorage {
         self.instance_meshlet_offsets.get_mut().clear();
         self.instance_meshlet_counts.get_mut().clear();
         self.instance_material_ids.get_mut().clear();
+    }
+
+    pub fn report_memory_host(&self) -> usize {
+        let mut total = 0;
+
+        total += size_of::<Self>();
+        total += self.instances.len() * size_of::<Instance>();
+        total
+    }
+
+    pub fn report_memory_device(&self) -> usize {
+        let mut total = 0;
+
+        total += self.instance_uniforms.get().size_in_bytes();
+        total += self.instance_aabbs.get().size_in_bytes();
+        total += self.instance_meshlet_offsets.get().size_in_bytes();
+        total += self.instance_meshlet_counts.get().size_in_bytes();
+        total += self.instance_material_ids.get().size_in_bytes();
+        total
     }
 }
 

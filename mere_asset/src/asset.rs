@@ -1,5 +1,6 @@
 use crate::{
     asset_server::{AssetEvent, AssetServer},
+    gpu_buffer::GpuBufferable,
     handle::{ResourceHandle, UntypedHandle},
     material::Material,
     texture::{Texture, TextureOptions},
@@ -22,6 +23,8 @@ pub trait Asset: Sized {
     }
 
     fn finish(&mut self, _asset_server: &AssetServer) {}
+
+    fn size_in_bytes(&self) -> usize;
 }
 
 impl Asset for MeshletMesh {
@@ -40,6 +43,17 @@ impl Asset for MeshletMesh {
         let _ = asset_server.send(AssetEvent::MeshletReady(ResourceHandle::from(
             self.name.as_str(),
         )));
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        let mut total = size_of::<Self>();
+
+        total += self.name.len();
+        total += self.vertices.size_in_bytes();
+        total += self.meshlet_vertex_indices.size_in_bytes();
+        total += self.meshlet_indices.size_in_bytes();
+        total += self.meshlets.size_in_bytes();
+        total
     }
 }
 
@@ -73,6 +87,13 @@ impl Asset for Texture {
 
         Ok(Self::from_image(device, queue, image, label, options)?)
     }
+
+    fn size_in_bytes(&self) -> usize {
+        let mut total = size_of::<Self>();
+
+        total += self.label.len();
+        total
+    }
 }
 
 impl Asset for Material {
@@ -102,6 +123,13 @@ impl Asset for Material {
 
     fn finish(&mut self, asset_server: &AssetServer) {
         self.try_finish(asset_server.device(), asset_server);
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        let mut total = size_of::<Self>();
+
+        total += self.name.len();
+        total
     }
 }
 

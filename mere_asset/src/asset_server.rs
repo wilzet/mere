@@ -139,6 +139,31 @@ impl AssetServer {
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
+
+    pub fn pending_dependencies(&self) -> usize {
+        self.dependency_listeners.read().len()
+    }
+
+    pub fn report_memory(&self) -> (usize, usize, usize) {
+        fn asset_size_in_bytes<T: Asset>(state: &AssetState<T>) -> usize {
+            if let AssetState::Ready(r) = state {
+                r.read().size_in_bytes()
+            } else {
+                0
+            }
+        }
+
+        let mesh_size = self.meshlets.read().values().map(asset_size_in_bytes).sum();
+        let tex_size = self.textures.read().values().map(asset_size_in_bytes).sum();
+        let mat_size = self
+            .materials
+            .read()
+            .values()
+            .map(asset_size_in_bytes)
+            .sum();
+
+        (mesh_size, tex_size, mat_size)
+    }
 }
 
 pub trait Resource<R: Asset> {

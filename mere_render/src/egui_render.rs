@@ -1,7 +1,7 @@
+use debug::DebugMemory;
 use egui::Context;
 use egui_wgpu::Renderer;
 use egui_winit::State;
-use std::collections::VecDeque;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
@@ -14,18 +14,10 @@ pub struct EguiRenderer {
     renderer: Renderer,
     frame_started: bool,
     scale_factor: f32,
-    fps_history: VecDeque<f32>,
+    debug_memory: DebugMemory,
 }
 
 impl EguiRenderer {
-    pub fn context(&self) -> &Context {
-        self.state.egui_ctx()
-    }
-
-    pub fn scale_factor(&self) -> f32 {
-        self.scale_factor
-    }
-
     pub fn new(
         device: &wgpu::Device,
         output_color_format: wgpu::TextureFormat,
@@ -59,13 +51,44 @@ impl EguiRenderer {
             renderer: egui_renderer,
             frame_started: false,
             scale_factor: 1.0,
-            fps_history: VecDeque::new(),
+            debug_memory: DebugMemory::new(),
         }
+    }
+
+    pub fn context(&self) -> &Context {
+        self.state.egui_ctx()
+    }
+
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     pub fn handle_input(&mut self, window: &Window, event: &WindowEvent) -> bool {
         let response = self.state.on_window_event(window, event);
-        response.consumed
+        let ctx = self.context();
+
+        if response.consumed || ctx.is_pointer_over_egui() {
+            return true;
+        }
+
+        ctx.pointer_interact_pos().map_or(false, |pos| {
+            let style = ctx.global_style();
+            let margin = style
+                .interaction
+                .resize_grab_radius_corner
+                .max(style.interaction.resize_grab_radius_side);
+
+            ctx.memory(|mem| {
+                mem.areas().visible_layer_ids().iter().any(|layer_id| {
+                    if layer_id.order == egui::Order::Background {
+                        return false;
+                    }
+
+                    mem.area_rect(layer_id.id)
+                        .map_or(false, |rect| rect.expand(margin).contains(pos))
+                })
+            })
+        })
     }
 
     pub fn ppp(&mut self, v: f32) {
@@ -74,7 +97,7 @@ impl EguiRenderer {
 
     pub fn begin_frame(&mut self, window: &Window) {
         let raw_input = self.state.take_egui_input(window);
-        self.state.egui_ctx().begin_pass(raw_input);
+        self.context().begin_pass(raw_input);
         self.frame_started = true;
     }
 
@@ -84,38 +107,68 @@ impl EguiRenderer {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         window: &Window,
-        window_surface_view: &wgpu::TextureView,
+        target_view: &wgpu::TextureView,
         screen_descriptor: egui_wgpu::ScreenDescriptor,
     ) {
-        if !self.frame_started {
-            panic!("begin_frame must be called before end_frame_and_draw can be called!");
-        }
+        assert!(
+            self.frame_started,
+            "begin_frame must be called before end_frame_and_draw can be called!"
+        );
 
         self.ppp(screen_descriptor.pixels_per_point);
 
-        let full_output = self.state.egui_ctx().end_pass();
+        let output = self.context().end_pass();
 
         self.state
-            .handle_platform_output(window, full_output.platform_output);
+            .handle_platform_output(window, output.platform_output);
 
         let tris = self
-            .state
-            .egui_ctx()
-            .tessellate(full_output.shapes, self.state.egui_ctx().pixels_per_point());
-        for (id, image_delta) in &full_output.textures_delta.set {
-            self.renderer
-                .update_texture(device.into(), queue.into(), *id, image_delta);
-        }
-        self.renderer.update_buffers(
-            device.into(),
-            queue.into(),
-            encoder.into(),
-            &tris,
+            .context()
+            .tessellate(output.shapes, output.pixels_per_point);
+
+        self.upload_textures(device, queue, output.textures_delta);
+        self.draw(
+            device,
+            queue,
+            encoder,
+            target_view,
             &screen_descriptor,
+            &tris,
         );
-        let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+
+        self.frame_started = false;
+    }
+
+    fn upload_textures(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: egui::TexturesDelta,
+    ) {
+        for (id, delta) in &textures.set {
+            self.renderer.update_texture(device, queue, *id, delta);
+        }
+
+        for x in &textures.free {
+            self.renderer.free_texture(x)
+        }
+    }
+
+    fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        tris: &[egui::ClippedPrimitive],
+    ) {
+        self.renderer
+            .update_buffers(device, queue, encoder, tris, screen_descriptor);
+
+        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: window_surface_view,
+                view: target_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -131,11 +184,6 @@ impl EguiRenderer {
         });
 
         self.renderer
-            .render(&mut rpass.forget_lifetime(), &tris, &screen_descriptor);
-        for x in &full_output.textures_delta.free {
-            self.renderer.free_texture(x)
-        }
-
-        self.frame_started = false;
+            .render(&mut pass.forget_lifetime(), tris, screen_descriptor);
     }
 }

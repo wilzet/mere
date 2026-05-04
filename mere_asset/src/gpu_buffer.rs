@@ -120,7 +120,7 @@ impl<T: GpuBufferable> GpuBuffer<T> {
                 let mut buffer_view = queue
                     .write_buffer_with(&self.buffer, buffer_slice.start, buffer_slice_size)
                     .unwrap();
-                data.write_bytes_le(metadata, buffer_view.slice(..), buffer_slice.start);
+                data.write_bytes_le(metadata, buffer_view.slice(..));
             });
 
         let queue_cap = self.write_queue.capacity();
@@ -157,6 +157,12 @@ impl<T: GpuBufferable> GpuBuffer<T> {
 
         self.buffer = new_buffer;
     }
+
+    pub fn size_in_bytes(&self) -> usize {
+        (self.allocator.initial_range().end
+            - self.allocator.initial_range().start
+            - self.allocator.total_available()) as usize
+    }
 }
 
 pub trait GpuBufferable {
@@ -164,12 +170,7 @@ pub trait GpuBufferable {
 
     fn size_in_bytes(&self) -> usize;
     fn as_bytes(&self) -> &[u8];
-    fn write_bytes_le(
-        &self,
-        _metadata: Self::Metadata,
-        mut buffer_slice: wgpu::WriteOnly<[u8]>,
-        _buffer_offset: wgpu::BufferAddress,
-    ) {
+    fn write_bytes_le(&self, _metadata: Self::Metadata, mut buffer_slice: wgpu::WriteOnly<[u8]>) {
         buffer_slice.copy_from_slice(self.as_bytes());
     }
 }
@@ -189,7 +190,6 @@ impl GpuBufferable for Arc<[Meshlet]> {
         &self,
         (vertex_offset, index_offset): Self::Metadata,
         mut buffer_slice: wgpu::WriteOnly<[u8]>,
-        _buffer_offset: wgpu::BufferAddress,
     ) {
         self.iter().enumerate().for_each(|(i, meshlet)| {
             const DATA_SIZE: usize = size_of::<Meshlet>();

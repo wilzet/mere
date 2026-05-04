@@ -145,6 +145,18 @@ impl World {
         &self.instances
     }
 
+    pub fn resources(&self) -> &ResourceStorage {
+        &self.resources
+    }
+
+    pub fn meshlets(&self) -> &MeshletStorage {
+        &self.meshlets
+    }
+
+    pub fn assets(&self) -> &AssetServer {
+        &self.asset_server
+    }
+
     pub fn add_camera(&mut self, camera: Camera) -> usize {
         let id = self.cameras.len();
         self.cameras.push(camera);
@@ -200,10 +212,6 @@ impl World {
 
         self.resources
             .generate_frame_resources(device, &self.meshlets, &self.instances);
-    }
-
-    pub fn resources(&self) -> &ResourceStorage {
-        &self.resources
     }
 }
 

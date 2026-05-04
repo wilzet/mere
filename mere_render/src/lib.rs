@@ -93,7 +93,11 @@ impl State {
     }
 
     pub fn handle_input(&mut self, event_loop: &ActiveEventLoop, event: &WindowEvent) {
-        let ui_input = self.egui_renderer.handle_input(&self.window, &event);
+        let ui_input = if !self.lock_cursor {
+            self.egui_renderer.handle_input(&self.window, &event)
+        } else {
+            false
+        };
 
         match *event {
             WindowEvent::KeyboardInput {
@@ -105,7 +109,7 @@ impl State {
                     },
                 ..
             } => self.handle_key(event_loop, code, key_state.is_pressed()),
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::CursorMoved { position, .. } if !ui_input => {
                 self.handle_mouse_moved(position.x, position.y)
             }
             WindowEvent::MouseInput {

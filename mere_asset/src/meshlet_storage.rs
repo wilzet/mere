@@ -78,4 +78,14 @@ impl MeshletStorage {
         self.indices.perform_writes(device, queue);
         self.meshlets.perform_writes(device, queue);
     }
+
+    pub fn report_memory(&self) -> usize {
+        let mut total = 0;
+
+        total += self.vertices.size_in_bytes();
+        total += self.vertex_indices.size_in_bytes();
+        total += self.indices.size_in_bytes();
+        total += self.meshlets.size_in_bytes();
+        total
+    }
 }
