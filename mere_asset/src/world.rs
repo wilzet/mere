@@ -64,12 +64,12 @@ impl World {
                 Some((model, transform, name))
             })
             .flat_map(|(model, transform, name)| {
-                model.primitives().map(move |mesh| {
+                model.primitives().map(move |primitive| {
                     let meshlet_mesh_handle = ResourceHandle::<MeshletMesh>::from(
-                        format!("{name}_{}", mesh.index()).as_str(),
+                        format!("{name}_{}", primitive.index()).as_str(),
                     );
 
-                    let material_handle = match mesh.material().name() {
+                    let material_handle = match primitive.material().name() {
                         Some(name) => ResourceHandle::from(name),
                         None => Material::DEFAULT_MATERIAL_ID,
                     };
@@ -189,7 +189,6 @@ impl World {
     }
 
     pub fn prepare_meshlet_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        self.instances.reset();
         self.instances.build_instance_buffers();
 
         if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
@@ -227,18 +226,18 @@ fn background_load_task(
     for model in gltf_asset.models() {
         let default_name = format!("{path}_model_{}", model.index());
         let name = model.name().unwrap_or(&default_name);
-        mere_meshes
-            .by_ref()
-            .zip(model.primitives())
-            .for_each(|(mesh, primitive)| {
-                match MeshletMesh::load((name, primitive.index() as u32, mesh)) {
-                    Ok(mesh) => {
-                        asset_server.add(mesh);
-                    }
-                    Err(err) => {
-                        mere_log::error!("Failed to load mesh {name}_{}: {err}", primitive.index())
-                    }
-                };
+
+        model
+            .primitives()
+            .zip(std::iter::from_fn(|| mere_meshes.next()))
+            .for_each(|(primitive, mesh)| {
+                MeshletMesh::load((name, primitive.index(), mesh))
+                    .map(|m| {
+                        asset_server.add(m);
+                    })
+                    .unwrap_or_else(|err| {
+                        mere_log::error!("Failed to load mesh {name}_{}: {err}", primitive.index());
+                    });
             });
     }
 

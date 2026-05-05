@@ -69,6 +69,8 @@ impl InstanceStorage {
     }
 
     pub fn build_instance_buffers(&mut self) {
+        self.reset();
+
         for (_, instance) in self.instances.iter() {
             let mesh_uniform = MeshUniform::new(instance.transform);
 
@@ -88,7 +90,7 @@ impl InstanceStorage {
         self.scene_instance_count = self.instances.len() as u32;
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.scene_instance_count = 0;
 
         self.instance_uniforms.get_mut().clear();
@@ -148,8 +150,8 @@ impl Instance {
     }
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Default, Debug)]
+#[repr(C)]
 pub struct MeshUniform {
     pub model: [[f32; 4]; 4],
     pub previous_model: [[f32; 4]; 4],

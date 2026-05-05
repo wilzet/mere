@@ -15,7 +15,7 @@ pub struct Meshlet {
 }
 
 impl Meshlet {
-    pub const MAX_VERTICES: usize = 64;
+    pub const MAX_VERTICES: usize = 255;
     pub const MAX_TRIANGLES: usize = 128;
     pub const MIN_TRIANGLES: usize = (Self::MAX_TRIANGLES / 3) & !3;
     pub const MAX_INDICES_PER_MESHLET: u32 = Self::MAX_TRIANGLES as u32 * 3;

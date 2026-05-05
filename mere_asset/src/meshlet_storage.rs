@@ -31,18 +31,26 @@ impl MeshletStorage {
         let handle = ResourceHandle::from(mesh.name.as_str());
         self.meshlet_mesh_slices.entry(handle).or_insert_with(|| {
             let vertices_slice = self.vertices.queue_write(Arc::clone(&mesh.vertices), ());
-            let vertex_indices_slice = self
-                .vertex_indices
-                .queue_write(Arc::clone(&mesh.meshlet_vertex_indices), ());
+
+            let adjusted_vertex_indices = mesh
+                .meshlet_vertex_indices
+                .iter()
+                .map(|i| i + (vertices_slice.start / size_of::<Vertex>() as u64) as u32)
+                .collect::<Vec<_>>()
+                .into();
+            let vertex_indices_slice = self.vertex_indices.queue_write(adjusted_vertex_indices, ());
             let indices_slice = self
                 .indices
                 .queue_write(Arc::clone(&mesh.meshlet_indices), ());
             let meshlets_slice = self.meshlets.queue_write(
                 Arc::clone(&mesh.meshlets),
-                (vertices_slice.start, indices_slice.start),
+                (
+                    vertex_indices_slice.start / size_of::<u32>() as u64,
+                    indices_slice.start,
+                ),
             );
 
-            mesh.meshlet_offset = meshlets_slice.start as u32;
+            mesh.meshlet_offset = (meshlets_slice.start / size_of::<Meshlet>() as u64) as u32;
 
             [
                 vertices_slice,

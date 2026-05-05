@@ -28,7 +28,10 @@ struct Vertex {
 }
 
 struct BoundingSphere {
-    center_radius: vec4<f32>,
+    center_x: f32,
+    center_y: f32,
+    center_z: f32,
+    radius: f32,
 }
 
 struct Meshlet {
@@ -43,9 +46,9 @@ struct Meshlet {
 struct MeshUniform {
     model_matrix: mat4x4<f32>,
     previous_model: mat4x4<f32>,
-    normal_matrix_0: vec3<f32>,
-    normal_matrix_1: vec3<f32>,
-    normal_matrix_2: vec3<f32>,
+    normal_matrix_0: vec4<f32>,
+    normal_matrix_1: vec4<f32>,
+    normal_matrix_2: vec4<f32>,
 }
 
 struct ClusterInfo {
@@ -83,7 +86,7 @@ fn vs_main(
     let info = cluster_info[cluster_id];
     let instance_id = info.instance_id;
     let meshlet_id = info.meshlet_id;
-    
+
     let instance = instances[instance_id];
     let meshlet = meshlets[meshlet_id];
 
@@ -91,8 +94,7 @@ fn vs_main(
     if index_id >= meshlet.index_count {
         // push off-screen
         var out: VertexOutput;
-        out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        out.color = vec3<f32>(0.0);
+        out.clip_position = vec4(0.0);
         return out;
     }
 

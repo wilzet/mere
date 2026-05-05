@@ -28,7 +28,7 @@ pub trait Asset: Sized {
 }
 
 impl Asset for MeshletMesh {
-    type Source<'a> = (&'a str, u32, mere_mesh::MeshletMesh);
+    type Source<'a> = (&'a str, usize, mere_mesh::MeshletMesh);
 
     fn load(source: Self::Source<'_>) -> anyhow::Result<Self> {
         let (name, index, mut mesh) = source;
@@ -89,10 +89,7 @@ impl Asset for Texture {
     }
 
     fn size_in_bytes(&self) -> usize {
-        let mut total = size_of::<Self>();
-
-        total += self.label.len();
-        total
+        (self.view.texture().size().height * self.view.texture().size().width * 4) as usize
     }
 }
 

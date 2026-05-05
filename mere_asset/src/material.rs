@@ -87,11 +87,8 @@ impl Material {
         let map_error = |name: &str, ty: &str, default: ResourceHandle<Texture>| {
             let local_name = name.to_string();
             let local_ty = ty.to_string();
-            let asset_server_inner = asset_server.clone();
             move || {
                 mere_log::warn!("material {local_name} is missing texture {local_ty}");
-                let id = ResourceHandle::<Material>::from(local_name.as_str());
-                asset_server_inner.subscribe(id.into(), id);
                 default
             }
         };

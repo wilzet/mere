@@ -96,6 +96,27 @@ impl AssetServer {
         dependency_handle: UntypedHandle,
         handle: ResourceHandle<R>,
     ) {
+        let dependency_ready = {
+            let type_id = dependency_handle.type_id();
+
+            if type_id == TypeId::of::<Material>() {
+                self.get(ResourceHandle::<Material>::new(*dependency_handle))
+                    .is_some()
+            } else if type_id == TypeId::of::<Texture>() {
+                self.get(ResourceHandle::<Texture>::new(*dependency_handle))
+                    .is_some()
+            } else if type_id == TypeId::of::<MeshletMesh>() {
+                self.get(ResourceHandle::<MeshletMesh>::new(*dependency_handle))
+                    .is_some()
+            } else {
+                false
+            }
+        };
+
+        if dependency_ready {
+            return;
+        }
+
         let mut listeners = self.dependency_listeners.write();
         listeners
             .entry(dependency_handle)

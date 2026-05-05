@@ -258,17 +258,11 @@ impl EguiRenderer {
                         ui.label("Meshes:");
                         ui.monospace(format!("{:.2} MB", to_mb(mesh_b)));
                         ui.end_row();
-                        ui.label("Textures:");
-                        ui.monospace(format!("{:.2} MB", to_mb(tex_b)));
-                        ui.end_row();
                         ui.label("Materials:");
                         ui.monospace(format!("{:.1} KB", to_kb(mat_b)));
                         ui.end_row();
                         ui.strong("Total RAM:");
-                        ui.strong(format!(
-                            "{:.2} MB",
-                            to_mb(inst_h_b + mesh_b + tex_b + mat_b)
-                        ));
+                        ui.strong(format!("{:.2} MB", to_mb(inst_h_b + mesh_b + mat_b)));
                         ui.end_row();
                     });
 
@@ -285,8 +279,11 @@ impl EguiRenderer {
                         ui.label("Meshlets:");
                         ui.monospace(format!("{:.2} MB", to_mb(mlet_b)));
                         ui.end_row();
+                        ui.label("Textures:");
+                        ui.monospace(format!("{:.2} MB", to_mb(tex_b)));
+                        ui.end_row();
                         ui.strong("Total VRAM:");
-                        ui.strong(format!("{:.2} MB", to_mb(inst_d_b + mlet_b)));
+                        ui.strong(format!("{:.2} MB", to_mb(inst_d_b + mlet_b + tex_b)));
                         ui.end_row();
                     });
 
@@ -322,6 +319,11 @@ impl EguiRenderer {
                     });
 
                 ui.add_space(4.0);
+
+                ui.small(format!(
+                    "Pending Dependencies: {}",
+                    world.assets().pending_dependencies()
+                ))
             },
         );
     }

@@ -79,7 +79,7 @@ impl ResourceStorage {
         let indirect_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("indirect_args"),
             contents: wgpu::util::DrawIndirectArgs {
-                vertex_count: Meshlet::MAX_TRIANGLES as u32,
+                vertex_count: Meshlet::MAX_INDICES_PER_MESHLET,
                 instance_count: 0,
                 first_vertex: 0,
                 first_instance: 0,
