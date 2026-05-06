@@ -1,10 +1,9 @@
 use crate::{
     CLUSTER_SLOTS,
-    camera::CameraUniform,
     lights::LightUniform,
     pipeline::{create_compute_pipeline, create_render_pipeline},
 };
-use mere_asset::{Camera, InstanceStorage, Material, ResourceStorage, Texture, World};
+use mere_asset::{InstanceStorage, Material, ResourceStorage, Texture, World};
 use mere_math::{Quat, Vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -21,9 +20,6 @@ pub struct Renderer {
     raster_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     bg_color: wgpu::Color,
-    main_camera_uniform: CameraUniform,
-    main_camera_buffer: wgpu::Buffer,
-    main_camera_bind_group: wgpu::BindGroup,
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
@@ -98,38 +94,6 @@ impl Renderer {
             view_formats: vec![],
         };
 
-        let main_camera_uniform = CameraUniform::new();
-
-        let main_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Main Camera Buffer"),
-            contents: bytemuck::cast_slice(&[main_camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("camera_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let main_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("main_camera_bind_group"),
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: main_camera_buffer.as_entire_binding(),
-            }],
-        });
-
         let light_uniform = LightUniform {
             position: [1.5, 2.0, 1.5],
             _padding: 0,
@@ -172,7 +136,10 @@ impl Renderer {
         let instance_cull_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("instance_cull_pipeline_layout"),
-                bind_group_layouts: &[Some(&world.resources().instance_cull_bind_group_layout)],
+                bind_group_layouts: &[
+                    Some(&world.resources().instance_cull_bind_group_layout),
+                    Some(&world.resources().render_view_bind_group_layout),
+                ],
                 immediate_size: 0,
             });
 
@@ -205,7 +172,7 @@ impl Renderer {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("raster_pipeline_layout"),
                 bind_group_layouts: &[
-                    Some(&camera_bind_group_layout),
+                    Some(&world.resources().render_view_bind_group_layout),
                     Some(&light_bind_group_layout),
                     Some(Material::material_bind_group_layout(&device)),
                     Some(&world.resources().meshlet_mesh_material_bind_group_layout),
@@ -242,9 +209,6 @@ impl Renderer {
                     b: 0.3,
                     a: 1.0,
                 },
-                main_camera_uniform,
-                main_camera_buffer,
-                main_camera_bind_group,
                 light_uniform,
                 light_buffer,
                 light_bind_group,
@@ -262,16 +226,6 @@ impl Renderer {
             Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
 
         self.is_surface_configured = true;
-    }
-
-    pub fn update_main_camera(&mut self, camera: &Camera) {
-        self.main_camera_uniform.update_view_proj(camera);
-
-        self.queue.write_buffer(
-            &self.main_camera_buffer,
-            0,
-            bytemuck::cast_slice(&[self.main_camera_uniform]),
-        );
     }
 
     pub fn update_light(&mut self, delta_time: f32) {
@@ -361,7 +315,12 @@ impl Renderer {
             instance_cull_pass.set_pipeline(&self.instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
-                Some(&per_frame_resources.bind_groups.instance_cull_bind_group),
+                &per_frame_resources.bind_groups.instance_cull_bind_group,
+                &[],
+            );
+            instance_cull_pass.set_bind_group(
+                1,
+                &per_frame_resources.bind_groups.render_view_bind_group,
                 &[],
             );
             instance_cull_pass.dispatch_workgroups(instances.scene_instance_count, 1, 1);
@@ -375,7 +334,7 @@ impl Renderer {
             cluster_cull_pass.set_pipeline(&self.cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
-                Some(&per_frame_resources.bind_groups.cluster_cull_bind_group),
+                &per_frame_resources.bind_groups.cluster_cull_bind_group,
                 &[],
             );
 
@@ -410,7 +369,11 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.raster_pipeline);
-            render_pass.set_bind_group(0, &self.main_camera_bind_group, &[]);
+            render_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.main_render_view_bind_group,
+                &[],
+            );
             render_pass.set_bind_group(1, &self.light_bind_group, &[]);
             render_pass.set_bind_group(2, &material.bind_group, &[]);
             render_pass.set_bind_group(

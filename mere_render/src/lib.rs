@@ -1,8 +1,4 @@
-use crate::{
-    camera::CameraController,
-    egui_render::{DebugWindow, EguiRenderer},
-    renderer::Renderer,
-};
+use crate::{camera::CameraController, egui_render::EguiRenderer, renderer::Renderer};
 use mere_asset::{Camera, Material, World};
 use mere_math::Vec3;
 use std::{sync::Arc, time::Duration};
@@ -29,6 +25,7 @@ pub struct State {
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
     world: World,
+    update_view: bool,
 }
 
 impl State {
@@ -42,12 +39,14 @@ impl State {
         //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
         for x in 0..10 {
             for y in 0..10 {
-                let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
-                world
-                    .get_instance_mut(teapot)
-                    .unwrap()
-                    .transform
-                    .translation += Vec3::X * 6.0 * x as f32 + Vec3::Z * 6.0 * y as f32;
+                for z in 0..10 {
+                    let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
+                    world
+                        .get_instance_mut(teapot)
+                        .unwrap()
+                        .transform
+                        .translation += Vec3::new(x as f32, y as f32, z as f32) * 6.0;
+                }
             }
         }
 
@@ -75,6 +74,7 @@ impl State {
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
             world,
+            update_view: true,
         })
     }
 
@@ -198,12 +198,12 @@ impl State {
         self.world.process_asset_event();
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        self.world.prepare_meshlet_resources(device, queue);
+        self.world
+            .prepare_meshlet_resources(device, queue, self.update_view);
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
-        self.mere_renderer
-            .update_main_camera(self.world.main_camera());
+
         self.mere_renderer.update_light(dt);
     }
 
@@ -230,8 +230,12 @@ impl State {
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            self.egui_renderer
-                .debug_window(&self.window, &self.world, delta_time);
+            self.egui_renderer.debug_window(
+                &self.window,
+                &self.world,
+                delta_time,
+                &mut self.update_view,
+            );
 
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [config.width, config.height],

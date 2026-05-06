@@ -188,7 +188,12 @@ impl World {
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
 
-    pub fn prepare_meshlet_resources(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn prepare_meshlet_resources(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        update_view: bool,
+    ) {
         self.instances.build_instance_buffers();
 
         if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
@@ -208,6 +213,9 @@ impl World {
             .write_buffer(device, queue);
 
         self.meshlets.perform_pending_uploads(device, queue);
+
+        self.resources
+            .update_render_view(queue, &self.cameras[0], update_view);
 
         self.resources
             .generate_frame_resources(device, &self.meshlets, &self.instances);

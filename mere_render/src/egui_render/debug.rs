@@ -52,12 +52,14 @@ impl DebugMemory {
     }
 }
 
-pub trait DebugWindow {
-    fn debug_window(&mut self, window: &Window, world: &World, delta_time: Duration);
-}
-
-impl DebugWindow for EguiRenderer {
-    fn debug_window(&mut self, window: &Window, world: &World, delta_time: Duration) {
+impl EguiRenderer {
+    pub fn debug_window(
+        &mut self,
+        window: &Window,
+        world: &World,
+        delta_time: Duration,
+        update_view: &mut bool,
+    ) {
         let (width, height): (f64, f64) = window.inner_size().into();
         let dt = delta_time.as_secs_f32();
         let frame_time_ms = dt * 1000.0;
@@ -66,6 +68,21 @@ impl DebugWindow for EguiRenderer {
         self.debug_memory.update_history(fps, dt);
         let avg_fps = self.debug_memory.avg_fps().unwrap_or(fps);
         let mut new_scale_factor = self.scale_factor;
+
+        egui::Window::new("Debug Controls").show(&self.context(), |ui| {
+            ui.label(format!("FPS: {:.1}", 1.0 / delta_time.as_secs_f32()));
+
+            ui.separator();
+
+            // The Checkbox toggle
+            ui.checkbox(update_view, "Freeze Culling/View Update");
+
+            if *update_view {
+                ui.label("Status: Updating frustum normally");
+            } else {
+                ui.colored_label(egui::Color32::KHAKI, "Status: Culling is FROZEN");
+            }
+        });
 
         egui::Window::new("MeRe Engine Debugger")
             .resizable(true)
