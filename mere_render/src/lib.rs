@@ -230,18 +230,30 @@ impl State {
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            self.egui_renderer.profiler().resolve_gpu(&mut encoder);
+            self.egui_renderer.profiler().resolve(&mut encoder);
 
-            self.egui_renderer
-                .debug_window(&self.window, device, &self.world, delta_time, &mut self.update_view);
+            self.egui_renderer.debug_window(
+                &self.window,
+                device,
+                queue,
+                &self.world,
+                delta_time,
+                &mut self.update_view,
+            );
 
             self.egui_renderer
                 .end_frame_and_draw(device, queue, &mut encoder, &self.window, &view);
         }
 
-        queue.submit(Some(encoder.finish()));
+        let submission_index = queue.submit(Some(encoder.finish()));
+        self.egui_renderer.profiler().set_submission_index(submission_index);
+
         output.present();
 
         Ok(())
+    }
+
+    pub fn after_render(&mut self) {
+        self.egui_renderer.profiler().finish_frame();
     }
 }

@@ -67,6 +67,7 @@ impl DebugMemory {
 pub fn debugger(
     debug_memory: &mut DebugMemory,
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     ctx: &egui::Context,
     window: &Window,
     world: &World,
@@ -82,36 +83,37 @@ pub fn debugger(
     let avg_fps = debug_memory.avg_fps().unwrap_or(fps);
     let mut new_scale_factor = debug_memory.scale_factor;
 
-        egui::Area::new(egui::Id::new("Debug Controls"))
-            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
-            .show(&ctx, |ui| {
-                egui::Frame::window(ui.style())
-                    .fill(egui::Color32::from_black_alpha(150))
-                    .shadow(egui::Shadow::NONE)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 8.0;
+    egui::Area::new(egui::Id::new("Debug Controls"))
+        .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
+        .show(&ctx, |ui| {
+            egui::Frame::window(ui.style())
+                .fill(egui::Color32::from_black_alpha(150))
+                .shadow(egui::Shadow::NONE)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
 
-                            ui.label(
-                                egui::RichText::new(format!("{:.0} FPS", avg_fps))
-                                    .color(egui::Color32::LIGHT_GREEN)
-                                    .strong(),
-                            );
+                        ui.label(
+                            egui::RichText::new(format!("{:.0} FPS", avg_fps))
+                                .color(egui::Color32::LIGHT_GREEN)
+                                .strong(),
+                        );
 
-                            ui.separator();
+                        ui.separator();
 
-                            if ui.input(|i| i.key_pressed(egui::Key::L)) {
-                                *update_view = !*update_view;
-                            }
+                        if ui.input(|i| i.key_pressed(egui::Key::L)) {
+                            *update_view = !*update_view;
+                        }
 
-                            let icon = if *update_view { "🔄" } else { "🔒" };
-                            ui.checkbox(update_view, format!("{} View", icon));
-                        })
-                    });
-            });
+                        let icon = if *update_view { "🔄" } else { "🔒" };
+                        ui.checkbox(update_view, format!("{} View", icon));
+                    })
+                });
+        });
 
     egui::Window::new("MeRe Engine Debugger")
         .resizable(true)
+        .anchor(egui::Align2::LEFT_TOP, [10.0, 10.0])
         .default_width(340.0)
         .default_height(450.0)
         .show(ctx, |ui| {
@@ -139,7 +141,16 @@ pub fn debugger(
                     .id_salt("main_debug_scroll")
                     .auto_shrink(false)
                     .show(ui, |ui| {
-                        draw_perf_section(ui, debug_memory, device, avg_fps, fps, frame_time_ms, dt);
+                        draw_perf_section(
+                            ui,
+                            debug_memory,
+                            device,
+                            queue,
+                            avg_fps,
+                            fps,
+                            frame_time_ms,
+                            dt,
+                        );
                         ui.separator();
 
                         draw_memory_section(ui, world);
@@ -158,6 +169,7 @@ fn draw_perf_section(
     ui: &mut egui::Ui,
     debug_memory: &mut DebugMemory,
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     avg_fps: f32,
     fps: f32,
     ft_ms: f32,
@@ -292,7 +304,7 @@ fn draw_perf_section(
 
             draw_timing_history(ui, "CPU Timings", &debug_memory.cpu_history, 100.0);
 
-            let gpu_spans = debug_memory.profiler.gpu_spans(device);
+            let gpu_spans = debug_memory.profiler.gpu_spans(device, queue);
             if !gpu_spans.is_empty() && debug_memory.profiler.enabled() {
                 debug_memory.gpu_history.push_back(gpu_spans);
 
@@ -300,6 +312,8 @@ fn draw_perf_section(
                     debug_memory.gpu_history.pop_front();
                 }
             }
+
+            draw_timing_history(ui, "GPU Timings", &debug_memory.gpu_history, 100.0);
 
             ui.horizontal(|ui| ui.checkbox(&mut new_profiler_enabled, "Profiler"));
 

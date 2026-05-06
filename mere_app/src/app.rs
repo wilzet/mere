@@ -67,8 +67,10 @@ impl ApplicationHandler for App {
                 if let Err(err) = state.render(dt) {
                     mere_log::error!("Render error: {err}");
                     event_loop.exit();
+                    return;
                 }
 
+                state.after_render();
                 state.request_redraw();
             }
             _ => state.handle_input(event_loop, &event),

@@ -96,6 +96,7 @@ impl EguiRenderer {
         &mut self,
         window: &Window,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         world: &mere_asset::World,
         delta_time: std::time::Duration,
         update_view: &mut bool,
@@ -103,14 +104,13 @@ impl EguiRenderer {
         debug::debugger(
             &mut self.debug_memory,
             device,
+            queue,
             &self.state.egui_ctx(),
             window,
             world,
             delta_time,
             update_view,
         );
-
-        self.debug_memory.profiler.reset();
     }
 
     pub fn end_frame_and_draw(
