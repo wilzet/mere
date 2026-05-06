@@ -69,20 +69,33 @@ impl EguiRenderer {
         let avg_fps = self.debug_memory.avg_fps().unwrap_or(fps);
         let mut new_scale_factor = self.scale_factor;
 
-        egui::Window::new("Debug Controls").show(&self.context(), |ui| {
-            ui.label(format!("FPS: {:.1}", 1.0 / delta_time.as_secs_f32()));
+        egui::Area::new(egui::Id::new("Debug Controls"))
+            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
+            .show(&self.context(), |ui| {
+                egui::Frame::window(ui.style())
+                    .fill(egui::Color32::from_black_alpha(150))
+                    .shadow(egui::Shadow::NONE)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
 
-            ui.separator();
+                            ui.label(
+                                egui::RichText::new(format!("{:.0} FPS", avg_fps))
+                                    .color(egui::Color32::LIGHT_GREEN)
+                                    .strong(),
+                            );
 
-            // The Checkbox toggle
-            ui.checkbox(update_view, "Freeze Culling/View Update");
+                            ui.separator();
 
-            if *update_view {
-                ui.label("Status: Updating frustum normally");
-            } else {
-                ui.colored_label(egui::Color32::KHAKI, "Status: Culling is FROZEN");
-            }
-        });
+                            if ui.input(|i| i.key_pressed(egui::Key::L)) {
+                                *update_view = !*update_view;
+                            }
+
+                            let icon = if *update_view { "🔄" } else { "🔒" };
+                            ui.checkbox(update_view, format!("{} View", icon));
+                        })
+                    });
+            });
 
         egui::Window::new("MeRe Engine Debugger")
             .resizable(true)

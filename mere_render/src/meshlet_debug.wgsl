@@ -118,7 +118,7 @@ fn vs_main(
     out.clip_position = main_camera.view_proj * world_position;
 
     // DEBUG: color per meshlet
-    out.color = hash_color(meshlet_id);
+    out.color = hash_color(meshlet_id + 1);
 
     return out;
 }
