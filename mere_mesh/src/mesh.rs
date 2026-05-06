@@ -276,15 +276,15 @@ pub fn read_mere_file(path: &Path) -> anyhow::Result<Vec<MeshletMesh>> {
 #[repr(C)]
 pub struct Aabb {
     center: Vec3,
-    extents: Vec3,
+    half_extents: Vec3,
 }
 
 unsafe impl bytemuck::Zeroable for Aabb {}
 unsafe impl bytemuck::Pod for Aabb {}
 
 impl Aabb {
-    pub fn new(center: Vec3, extents: Vec3) -> Self {
-        Self { center, extents }
+    pub fn new(center: Vec3, half_extents: Vec3) -> Self {
+        Self { center, half_extents }
     }
 
     pub fn from_vertices(vertices: &[Vertex]) -> Self {
@@ -295,8 +295,8 @@ impl Aabb {
             });
 
         let center = (min + max) * 0.5;
-        let extents = max - min;
+        let half_extents = max - center;
 
-        Self { center, extents }
+        Self { center, half_extents }
     }
 }

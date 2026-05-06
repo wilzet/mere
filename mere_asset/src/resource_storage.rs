@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
     pub cluster_info: wgpu::Buffer,
+    pub visible_cluster_info: wgpu::Buffer,
     pub main_render_view: wgpu::Buffer,
     pub render_view: wgpu::Buffer,
 
@@ -23,6 +24,12 @@ impl ResourceStorage {
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("meshlet_cluster_info"),
+                size: 2 * cluster_slots as u64 * size_of::<u32>() as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            visible_cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("meshlet_visible_cluster_info"),
                 size: 2 * cluster_slots as u64 * size_of::<u32>() as u64,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
@@ -51,6 +58,7 @@ impl ResourceStorage {
                         storage_buffer_layout_entry(3, wgpu::ShaderStages::COMPUTE, true),
                         storage_buffer_layout_entry(4, wgpu::ShaderStages::COMPUTE, false),
                         storage_buffer_layout_entry(5, wgpu::ShaderStages::COMPUTE, false),
+                        storage_buffer_layout_entry(6, wgpu::ShaderStages::COMPUTE, false),
                     ],
                 },
             ),
@@ -60,7 +68,10 @@ impl ResourceStorage {
                     entries: &[
                         storage_buffer_layout_entry(0, wgpu::ShaderStages::COMPUTE, true),
                         storage_buffer_layout_entry(1, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(2, wgpu::ShaderStages::COMPUTE, false),
+                        storage_buffer_layout_entry(2, wgpu::ShaderStages::COMPUTE, true),
+                        storage_buffer_layout_entry(3, wgpu::ShaderStages::COMPUTE, true),
+                        storage_buffer_layout_entry(4, wgpu::ShaderStages::COMPUTE, false),
+                        storage_buffer_layout_entry(5, wgpu::ShaderStages::COMPUTE, false),
                     ],
                 },
             ),
@@ -103,8 +114,14 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let indirect_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("indirect_args"),
+        let indirect_cluster_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("indirect_cluster_args"),
+            contents: wgpu::util::DispatchIndirectArgs { x: 0, y: 1, z: 1 }.as_bytes(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+        });
+
+        let indirect_draw_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("indirect_draw_args"),
             contents: wgpu::util::DrawIndirectArgs {
                 vertex_count: Meshlet::MAX_INDICES_PER_MESHLET,
                 instance_count: 0,
@@ -144,6 +161,10 @@ impl ResourceStorage {
                         binding: 5,
                         resource: visible_instance_cluster_count.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: indirect_cluster_args.as_entire_binding(),
+                    },
                 ],
             }),
             cluster_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -152,7 +173,7 @@ impl ResourceStorage {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: self.cluster_info.as_entire_binding(),
+                        resource: instances.instance_uniforms.binding().unwrap(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -160,7 +181,19 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: indirect_args.as_entire_binding(),
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.visible_cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: indirect_draw_args.as_entire_binding(),
                     },
                 ],
             }),
@@ -191,7 +224,7 @@ impl ResourceStorage {
                         },
                         wgpu::BindGroupEntry {
                             binding: 5,
-                            resource: self.cluster_info.as_entire_binding(),
+                            resource: self.visible_cluster_info.as_entire_binding(),
                         },
                     ],
                 },
@@ -215,8 +248,8 @@ impl ResourceStorage {
         };
 
         self.meshlet_per_frame_resources = Some(PerFrameResources {
-            visible_instance_cluster_count,
-            indirect_args,
+            indirect_cluster_args,
+            indirect_draw_args,
             bind_groups,
         });
     }
@@ -266,8 +299,8 @@ pub struct MeshletBindGroups {
 
 #[derive(Clone, Debug)]
 pub struct PerFrameResources {
-    pub visible_instance_cluster_count: wgpu::Buffer,
-    pub indirect_args: wgpu::Buffer,
+    pub indirect_cluster_args: wgpu::Buffer,
+    pub indirect_draw_args: wgpu::Buffer,
     pub bind_groups: MeshletBindGroups,
 }
 

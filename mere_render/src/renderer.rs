@@ -155,7 +155,10 @@ impl Renderer {
         let cluster_cull_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("cluster_cull_pipeline_layout"),
-                bind_group_layouts: &[Some(&world.resources().cluster_cull_bind_group_layout)],
+                bind_group_layouts: &[
+                    Some(&world.resources().cluster_cull_bind_group_layout),
+                    Some(&world.resources().render_view_bind_group_layout),
+                ],
                 immediate_size: 0,
             });
 
@@ -337,10 +340,14 @@ impl Renderer {
                 &per_frame_resources.bind_groups.cluster_cull_bind_group,
                 &[],
             );
+            cluster_cull_pass.set_bind_group(
+                1,
+                &per_frame_resources.bind_groups.render_view_bind_group,
+                &[],
+            );
 
-            let cluster_count = instances.count_clusters().div_ceil(128);
-
-            cluster_cull_pass.dispatch_workgroups(cluster_count as u32, 1, 1);
+            cluster_cull_pass
+                .dispatch_workgroups_indirect(&per_frame_resources.indirect_cluster_args, 0);
         }
 
         {
@@ -384,7 +391,7 @@ impl Renderer {
                 &[],
             );
 
-            render_pass.draw_indirect(&per_frame_resources.indirect_args, 0);
+            render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
         }
     }
 }
