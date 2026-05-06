@@ -1,5 +1,6 @@
 use crate::{
     CLUSTER_SLOTS,
+    egui_render::Profiler,
     lights::LightUniform,
     pipeline::{create_compute_pipeline, create_render_pipeline},
 };
@@ -55,7 +56,8 @@ impl Renderer {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Rendering device"),
                 required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                    | wgpu::Features::POLYGON_MODE_LINE,
+                    | wgpu::Features::POLYGON_MODE_LINE
+                    | wgpu::Features::TIMESTAMP_QUERY,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits {
                     max_compute_workgroup_size_x: 1024,
@@ -305,15 +307,18 @@ impl Renderer {
         instances: &InstanceStorage,
         resources: &ResourceStorage,
         material: &Material,
+        profiler: &mut Profiler,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
             return;
         };
 
         {
+            let timestamp_writes = profiler.begin("instance_cull_pass");
+
             let mut instance_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("instance_cull_pass"),
-                timestamp_writes: None,
+                timestamp_writes,
             });
             instance_cull_pass.set_pipeline(&self.instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
@@ -327,12 +332,16 @@ impl Renderer {
                 &[],
             );
             instance_cull_pass.dispatch_workgroups(instances.scene_instance_count, 1, 1);
+
+            profiler.end();
         }
 
         {
+            let timestamp_writes = profiler.begin("cluster_cull_pass");
+
             let mut cluster_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("cluster_cull_pass"),
-                timestamp_writes: None,
+                timestamp_writes,
             });
             cluster_cull_pass.set_pipeline(&self.cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
@@ -348,9 +357,13 @@ impl Renderer {
 
             cluster_cull_pass
                 .dispatch_workgroups_indirect(&per_frame_resources.indirect_cluster_args, 0);
+
+            profiler.end();
         }
 
         {
+            let timestamp_writes = profiler.begin("raster_pass");
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("raster_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -371,7 +384,7 @@ impl Renderer {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes,
                 multiview_mask: None,
             });
 
@@ -392,6 +405,8 @@ impl Renderer {
             );
 
             render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
+
+            profiler.end();
         }
     }
 }

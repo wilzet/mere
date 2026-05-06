@@ -6,12 +6,14 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 mod debug;
+mod profiler;
+
+pub use profiler::Profiler;
 
 pub struct EguiRenderer {
     state: State,
     renderer: Renderer,
     frame_started: bool,
-    scale_factor: f32,
     debug_memory: DebugMemory,
 }
 
@@ -48,22 +50,13 @@ impl EguiRenderer {
             state: egui_state,
             renderer: egui_renderer,
             frame_started: false,
-            scale_factor: 1.0,
-            debug_memory: DebugMemory::new(),
+            debug_memory: DebugMemory::new(device),
         }
-    }
-
-    pub fn context(&self) -> &Context {
-        self.state.egui_ctx()
-    }
-
-    pub fn scale_factor(&self) -> f32 {
-        self.scale_factor
     }
 
     pub fn handle_input(&mut self, window: &Window, event: &WindowEvent) -> bool {
         let response = self.state.on_window_event(window, event);
-        let ctx = self.context();
+        let ctx = self.state.egui_ctx();
 
         if response.consumed || ctx.is_pointer_over_egui() {
             return true;
@@ -89,14 +82,35 @@ impl EguiRenderer {
         })
     }
 
-    pub fn ppp(&mut self, v: f32) {
-        self.context().set_pixels_per_point(v);
+    pub fn profiler(&mut self) -> &mut Profiler {
+        &mut self.debug_memory.profiler
     }
 
     pub fn begin_frame(&mut self, window: &Window) {
         let raw_input = self.state.take_egui_input(window);
-        self.context().begin_pass(raw_input);
+        self.state.egui_ctx().begin_pass(raw_input);
         self.frame_started = true;
+    }
+
+    pub fn debug_window(
+        &mut self,
+        window: &Window,
+        device: &wgpu::Device,
+        world: &mere_asset::World,
+        delta_time: std::time::Duration,
+        update_view: &mut bool,
+    ) {
+        debug::debugger(
+            &mut self.debug_memory,
+            device,
+            &self.state.egui_ctx(),
+            window,
+            world,
+            delta_time,
+            update_view,
+        );
+
+        self.debug_memory.profiler.reset();
     }
 
     pub fn end_frame_and_draw(
@@ -106,22 +120,32 @@ impl EguiRenderer {
         encoder: &mut wgpu::CommandEncoder,
         window: &Window,
         target_view: &wgpu::TextureView,
-        screen_descriptor: egui_wgpu::ScreenDescriptor,
     ) {
         assert!(
             self.frame_started,
             "begin_frame must be called before end_frame_and_draw can be called!"
         );
 
-        self.ppp(screen_descriptor.pixels_per_point);
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [
+                target_view.texture().width(),
+                target_view.texture().height(),
+            ],
+            pixels_per_point: window.scale_factor() as f32 * self.debug_memory.scale_factor(),
+        };
 
-        let output = self.context().end_pass();
+        self.state
+            .egui_ctx()
+            .set_pixels_per_point(screen_descriptor.pixels_per_point);
+
+        let output = self.state.egui_ctx().end_pass();
 
         self.state
             .handle_platform_output(window, output.platform_output);
 
         let tris = self
-            .context()
+            .state
+            .egui_ctx()
             .tessellate(output.shapes, output.pixels_per_point);
 
         self.upload_textures(device, queue, output.textures_delta);

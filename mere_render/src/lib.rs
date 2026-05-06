@@ -214,7 +214,6 @@ impl State {
         };
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        let config = self.mere_renderer.get_config();
 
         let material_lock = self.world.get_material(Material::DEFAULT_MATERIAL_ID);
         let material = material_lock.read();
@@ -225,32 +224,19 @@ impl State {
             self.world.instances(),
             self.world.resources(),
             &material,
+            self.egui_renderer.profiler(),
         );
 
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            self.egui_renderer.debug_window(
-                &self.window,
-                &self.world,
-                delta_time,
-                &mut self.update_view,
-            );
+            self.egui_renderer.profiler().resolve_gpu(&mut encoder);
 
-            let screen_descriptor = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [config.width, config.height],
-                pixels_per_point: self.window.scale_factor() as f32
-                    * self.egui_renderer.scale_factor(),
-            };
+            self.egui_renderer
+                .debug_window(&self.window, device, &self.world, delta_time, &mut self.update_view);
 
-            self.egui_renderer.end_frame_and_draw(
-                device,
-                queue,
-                &mut encoder,
-                &self.window,
-                &view,
-                screen_descriptor,
-            );
+            self.egui_renderer
+                .end_frame_and_draw(device, queue, &mut encoder, &self.window, &view);
         }
 
         queue.submit(Some(encoder.finish()));
