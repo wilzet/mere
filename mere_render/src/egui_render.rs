@@ -7,8 +7,6 @@ use winit::window::Window;
 
 mod debug;
 
-pub use debug::DebugWindow;
-
 pub struct EguiRenderer {
     state: State,
     renderer: Renderer,

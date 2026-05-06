@@ -1,27 +1,6 @@
 use mere_asset::Camera;
-use mere_math::{Mat4, Quat, Vec3};
+use mere_math::{Quat, Vec3};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta, keyboard::KeyCode};
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-pub struct CameraUniform {
-    view_position: [f32; 4],
-    view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    pub fn new() -> Self {
-        Self {
-            view_position: [0.0; 4],
-            view_proj: Mat4::IDENTITY.to_cols_array_2d(),
-        }
-    }
-
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_position = camera.transform.translation.to_homogeneous().into();
-        self.view_proj = (camera.projection_matrix() * camera.view_matrix()).to_cols_array_2d();
-    }
-}
 
 pub struct CameraController {
     speed: f32,

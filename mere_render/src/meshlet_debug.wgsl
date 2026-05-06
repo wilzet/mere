@@ -1,6 +1,8 @@
-struct Camera {
+struct RenderView {
     view_pos: vec4<f32>,
     view_proj: mat4x4<f32>,
+    // 6 planes: Left, Right, Top, Bottom, Near, Far
+    planes: array<vec4<f32>, 6>,
 }
 
 struct Light {
@@ -17,7 +19,7 @@ struct MaterialProperties {
 
 // --- Vertex shader ---
 
-@group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(0) var<storage, read> main_camera: RenderView;
 @group(1) @binding(0) var<uniform> light: Light;
 
 struct Vertex {
@@ -113,10 +115,10 @@ fn vs_main(
     let position = vec4(v.position[0], v.position[1], v.position[2], 1.0);
     let world_position = instance.model_matrix * position;
 
-    out.clip_position = camera.view_proj * world_position;
+    out.clip_position = main_camera.view_proj * world_position;
 
     // DEBUG: color per meshlet
-    out.color = hash_color(meshlet_id);
+    out.color = hash_color(meshlet_id + 1);
 
     return out;
 }
