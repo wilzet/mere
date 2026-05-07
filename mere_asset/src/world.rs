@@ -137,10 +137,6 @@ impl World {
         }
     }
 
-    pub fn iter_instances(&self) -> slotmap::dense::Values<'_, InstanceHandle, Instance> {
-        self.instances.iter()
-    }
-
     pub fn instances(&self) -> &InstanceStorage {
         &self.instances
     }

@@ -2,6 +2,7 @@ use debug::DebugMemory;
 use egui::Context;
 use egui_wgpu::Renderer;
 use egui_winit::State;
+use mere_asset::World;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
@@ -97,9 +98,9 @@ impl EguiRenderer {
         window: &Window,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        world: &mere_asset::World,
+        world: &mut World,
         delta_time: std::time::Duration,
-        update_view: &mut bool,
+        lock_view: &mut bool,
     ) {
         debug::debugger(
             &mut self.debug_memory,
@@ -109,7 +110,7 @@ impl EguiRenderer {
             window,
             world,
             delta_time,
-            update_view,
+            lock_view,
         );
     }
 

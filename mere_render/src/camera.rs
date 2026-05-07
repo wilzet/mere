@@ -17,6 +17,9 @@ pub struct CameraController {
 }
 
 impl CameraController {
+    pub const MIN_ZOOM: f32 = 1f32.to_radians();
+    pub const MAX_ZOOM: f32 = 170f32.to_radians();
+
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
@@ -94,9 +97,7 @@ impl CameraController {
         const ZOOM_WEIGHT: f32 = 0.1;
         camera.fov_y += self.scroll * self.sensitivity * ZOOM_WEIGHT;
 
-        let min_fov = 1.0f32.to_radians();
-        let max_fov = 170.0f32.to_radians();
-        camera.fov_y = camera.fov_y.clamp(min_fov, max_fov);
+        camera.fov_y = camera.fov_y.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
 
         self.scroll = 0.0;
 

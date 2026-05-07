@@ -25,7 +25,7 @@ pub struct State {
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
     world: World,
-    update_view: bool,
+    lock_view: bool,
 }
 
 impl State {
@@ -74,7 +74,7 @@ impl State {
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
             world,
-            update_view: true,
+            lock_view: false,
         })
     }
 
@@ -199,7 +199,7 @@ impl State {
 
         let (device, queue) = self.mere_renderer.get_device_queue();
         self.world
-            .prepare_meshlet_resources(device, queue, self.update_view);
+            .prepare_meshlet_resources(device, queue, !self.lock_view);
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
@@ -236,9 +236,9 @@ impl State {
                 &self.window,
                 device,
                 queue,
-                &self.world,
+                &mut self.world,
                 delta_time,
-                &mut self.update_view,
+                &mut self.lock_view,
             );
 
             self.egui_renderer
@@ -246,7 +246,9 @@ impl State {
         }
 
         let submission_index = queue.submit(Some(encoder.finish()));
-        self.egui_renderer.profiler().set_submission_index(submission_index);
+        self.egui_renderer
+            .profiler()
+            .set_submission_index(submission_index);
 
         output.present();
 
