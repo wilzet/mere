@@ -1,4 +1,8 @@
-use crate::{camera::CameraController, egui_render::EguiRenderer, renderer::Renderer};
+use crate::{
+    camera::CameraController,
+    egui_debugger::{EguiRenderer, Profiler},
+    renderer::Renderer,
+};
 use mere_asset::{Camera, Material, World};
 use mere_math::{Transform, Vec3};
 use std::{sync::Arc, time::Duration};
@@ -10,7 +14,7 @@ use winit::{
 };
 
 mod camera;
-mod egui_render;
+mod egui_debugger;
 mod lights;
 mod pipeline;
 mod renderer;
@@ -19,13 +23,14 @@ pub const CLUSTER_SLOTS: u32 = 1 << 20;
 
 pub struct State {
     mere_renderer: Renderer,
-    egui_renderer: EguiRenderer,
     window: Arc<Window>,
     lock_cursor: bool,
     camera_controller: CameraController,
     stored_cursor_pos: (f64, f64),
     world: World,
     lock_view: bool,
+    egui_renderer: EguiRenderer,
+    profiler: Profiler,
 }
 
 impl State {
@@ -70,18 +75,20 @@ impl State {
         let camera_controller = CameraController::new(5.0, 0.002);
 
         let egui_renderer = EguiRenderer::new(&device, config.format, None, 1, &window);
+        let profiler = Profiler::new(device);
 
         mere_log::success!("State initialization complete.");
 
         Ok(Self {
             mere_renderer,
-            egui_renderer,
             window,
             lock_cursor: false,
             camera_controller,
             stored_cursor_pos: (0.0, 0.0),
             world,
             lock_view: false,
+            egui_renderer,
+            profiler,
         })
     }
 
@@ -231,18 +238,19 @@ impl State {
             self.world.instances(),
             self.world.resources(),
             &material,
-            self.egui_renderer.profiler(),
+            &mut self.profiler,
         );
 
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            self.egui_renderer.profiler().resolve(&mut encoder);
+            self.profiler.resolve(&mut encoder);
 
             self.egui_renderer.debug_window(
-                &self.window,
+                &mut self.profiler,
                 device,
                 queue,
+                &self.window,
                 &mut self.world,
                 delta_time,
                 &mut self.lock_view,
@@ -253,9 +261,7 @@ impl State {
         }
 
         let submission_index = queue.submit(Some(encoder.finish()));
-        self.egui_renderer
-            .profiler()
-            .set_submission_index(submission_index);
+        self.profiler.set_submission_index(submission_index);
 
         output.present();
 
@@ -263,6 +269,6 @@ impl State {
     }
 
     pub fn after_render(&mut self) {
-        self.egui_renderer.profiler().finish_frame();
+        self.profiler.finish_frame();
     }
 }

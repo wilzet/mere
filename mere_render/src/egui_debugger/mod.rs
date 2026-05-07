@@ -51,7 +51,7 @@ impl EguiRenderer {
             state: egui_state,
             renderer: egui_renderer,
             frame_started: false,
-            debug_memory: DebugMemory::new(device),
+            debug_memory: DebugMemory::new(),
         }
     }
 
@@ -83,10 +83,6 @@ impl EguiRenderer {
         })
     }
 
-    pub fn profiler(&mut self) -> &mut Profiler {
-        &mut self.debug_memory.profiler
-    }
-
     pub fn begin_frame(&mut self, window: &Window) {
         let raw_input = self.state.take_egui_input(window);
         self.state.egui_ctx().begin_pass(raw_input);
@@ -95,15 +91,17 @@ impl EguiRenderer {
 
     pub fn debug_window(
         &mut self,
-        window: &Window,
+        profiler: &mut Profiler,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        window: &Window,
         world: &mut World,
         delta_time: std::time::Duration,
         lock_view: &mut bool,
     ) {
         debug::debugger(
             &mut self.debug_memory,
+            profiler,
             device,
             queue,
             &self.state.egui_ctx(),

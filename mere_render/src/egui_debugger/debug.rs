@@ -26,7 +26,6 @@ const INSTANCE_ROW_HEIGHT: f32 = 28.0;
 const INSTANCE_EXPANDED_HEIGHT: f32 = 120.0;
 
 pub struct DebugMemory {
-    pub profiler: Profiler,
     scale_factor: f32,
     fps_history: VecDeque<f32>,
     fps_long_history: VecDeque<f32>,
@@ -39,9 +38,8 @@ pub struct DebugMemory {
 }
 
 impl DebugMemory {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new() -> Self {
         Self {
-            profiler: Profiler::new(device),
             scale_factor: 1.0,
             fps_history: VecDeque::with_capacity(1001),
             fps_long_history: VecDeque::with_capacity(3601),
@@ -87,6 +85,7 @@ impl DebugMemory {
 
 pub fn debugger(
     debug_memory: &mut DebugMemory,
+    profiler: &mut Profiler,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     ctx: &egui::Context,
@@ -145,6 +144,7 @@ pub fn debugger(
                 draw_perf_section(
                     ui,
                     debug_memory,
+                    profiler,
                     device,
                     queue,
                     avg_fps,
@@ -262,6 +262,7 @@ fn draw_overlay_controls(
 fn draw_perf_section(
     ui: &mut egui::Ui,
     debug_memory: &mut DebugMemory,
+    profiler: &mut Profiler,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     avg_fps: f32,
@@ -314,10 +315,10 @@ fn draw_perf_section(
                 );
             });
 
-        let mut profiler_enabled = debug_memory.profiler.enabled();
+        let mut profiler_enabled = profiler.enabled();
 
         egui::CollapsingHeader::new(section_header("Pass Timings")).show(ui, |ui| {
-            let cpu_spans = debug_memory.profiler.cpu_spans();
+            let cpu_spans = profiler.cpu_spans();
 
             if profiler_enabled && !cpu_spans.is_empty() {
                 debug_memory.cpu_history.push_back(cpu_spans);
@@ -328,7 +329,7 @@ fn draw_perf_section(
 
             draw_timing_history(ui, "CPU Timings", &debug_memory.cpu_history, 120.0);
 
-            let gpu_spans = debug_memory.profiler.gpu_spans(device, queue);
+            let gpu_spans = profiler.gpu_spans(device, queue);
 
             if profiler_enabled && !gpu_spans.is_empty() {
                 debug_memory.gpu_history.push_back(gpu_spans);
@@ -344,7 +345,7 @@ fn draw_perf_section(
             ui.checkbox(&mut profiler_enabled, "Profiler");
         });
 
-        debug_memory.profiler.set_enabled(profiler_enabled);
+        profiler.set_enabled(profiler_enabled);
     });
 }
 
@@ -813,13 +814,15 @@ fn muted(text: impl ToString) -> egui::RichText {
 }
 
 fn pass_color(name: &str) -> egui::Color32 {
-    match name {
-        "instance_cull_pass" => ERROR,
-        "cluster_cull_pass" => WARNING,
-        "raster_pass" => SUCCESS,
-        "lighting_pass" => ACCENT,
-        _ => egui::Color32::GRAY,
-    }
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let hue = (hash % 360) as f32 / 360.0;
+
+    egui::ecolor::Hsva::new(hue, 0.7, 0.9, 1.0).into()
 }
 
 fn format_duration_ns(duration_ns: f32) -> String {

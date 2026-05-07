@@ -1,6 +1,6 @@
 use crate::{
     CLUSTER_SLOTS,
-    egui_render::Profiler,
+    egui_debugger::Profiler,
     lights::LightUniform,
     pipeline::{create_compute_pipeline, create_render_pipeline},
 };
