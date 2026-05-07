@@ -284,7 +284,10 @@ unsafe impl bytemuck::Pod for Aabb {}
 
 impl Aabb {
     pub fn new(center: Vec3, half_extents: Vec3) -> Self {
-        Self { center, half_extents }
+        Self {
+            center,
+            half_extents,
+        }
     }
 
     pub fn from_vertices(vertices: &[Vertex]) -> Self {
@@ -297,6 +300,9 @@ impl Aabb {
         let center = (min + max) * 0.5;
         let half_extents = max - center;
 
-        Self { center, half_extents }
+        Self {
+            center,
+            half_extents,
+        }
     }
 }
