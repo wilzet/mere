@@ -123,6 +123,7 @@ impl InstanceStorage {
 #[derive(Clone, Copy, Debug)]
 pub struct Instance {
     pub transform: Transform,
+    pub previous_transform: Transform,
     pub aabb: Aabb,
     pub meshlet: ResourceHandle<MeshletMesh>,
     pub meshlet_offset: u32,
@@ -141,6 +142,7 @@ impl Instance {
     ) -> Self {
         Self {
             transform,
+            previous_transform: transform,
             aabb,
             meshlet: meshlet_mesh_handle,
             meshlet_offset,
