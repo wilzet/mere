@@ -1,6 +1,6 @@
 use crate::{camera::CameraController, egui_render::EguiRenderer, renderer::Renderer};
 use mere_asset::{Camera, Material, World};
-use mere_math::Vec3;
+use mere_math::{Transform, Vec3};
 use std::{sync::Arc, time::Duration};
 use winit::{
     event::*,
@@ -37,15 +37,22 @@ impl State {
 
         //world.load_gltf("sponza/main_sponza", device, queue)?;
         //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
+        let teapot_handle = world.load_gltf("utah_teapot", device, queue)?[0];
+        let teapot = world.get_instance(teapot_handle).unwrap().clone();
         for x in 0..10 {
             for y in 0..10 {
                 for z in 0..10 {
-                    let teapot = world.load_gltf("utah_teapot", device, queue)?[0];
-                    world
-                        .get_instance_mut(teapot)
-                        .unwrap()
-                        .transform
-                        .translation += Vec3::new(x as f32, y as f32, z as f32) * 6.0;
+                    if x == 0 && y == 0 && z == 0 {
+                        continue;
+                    }
+
+                    world.add_instance(
+                        Transform::new()
+                            .with_translation(Vec3::new(x as f32, y as f32, z as f32) * 6.0)
+                            .with_rotation(teapot.transform.rotation),
+                        teapot.meshlet_mesh,
+                        teapot.material,
+                    );
                 }
             }
         }

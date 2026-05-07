@@ -436,7 +436,7 @@ fn draw_scene_section(ui: &mut egui::Ui, debug_memory: &mut DebugMemory, world: 
 
                         ui.allocate_ui(egui::vec2(ui.available_width(), row_height), |ui| {
                             let mesh_name = world
-                                .get_meshlet_mesh(instance.meshlet)
+                                .get_meshlet_mesh(instance.meshlet_mesh)
                                 .map(|m| m.read().name.clone())
                                 .unwrap_or_else(|| "Unknown".to_string());
 

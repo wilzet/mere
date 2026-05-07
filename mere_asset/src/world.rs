@@ -43,7 +43,6 @@ impl World {
     ) -> anyhow::Result<Vec<InstanceHandle>> {
         let gltf_asset = load_gltf_asset(path)?;
 
-        let asset_server_inner = self.asset_server.clone();
         let device = device.clone();
         let queue = queue.clone();
 
@@ -78,32 +77,13 @@ impl World {
                 })
             })
             .map(|(transform, meshlet_mesh_handle, material_handle)| {
-                let mesh_loaded = asset_server_inner.reserve_handle(meshlet_mesh_handle);
-                let (aabb, meshlet_offset, meshlet_count) = if mesh_loaded {
-                    let meshlet_mesh_lock = asset_server_inner.get(meshlet_mesh_handle).unwrap();
-                    let meshlet_mesh = meshlet_mesh_lock.read();
-                    (
-                        meshlet_mesh.aabb,
-                        meshlet_mesh.meshlet_offset,
-                        meshlet_mesh.meshlets.len() as u32,
-                    )
-                } else {
-                    (Aabb::default(), 0, 0)
-                };
-
-                asset_server_inner.reserve_handle(material_handle);
-                self.instances.add_instance(Instance::new(
-                    transform,
-                    aabb,
-                    meshlet_mesh_handle,
-                    meshlet_offset,
-                    meshlet_count,
-                    material_handle,
-                ))
+                self.add_instance(transform, meshlet_mesh_handle, material_handle)
+                    .unwrap()
             })
             .collect();
 
         let path_string = path.to_string();
+        let asset_server_inner = self.asset_server.clone();
         std::thread::spawn(move || {
             if let Err(err) =
                 background_load_task(&path_string, gltf_asset, device, queue, asset_server_inner)
@@ -126,7 +106,7 @@ impl World {
                     let base_offset = self.meshlets.queue_upload(&mut meshlet_mesh);
 
                     for instance in self.instances.iter_mut() {
-                        if instance.meshlet == handle {
+                        if instance.meshlet_mesh == handle {
                             instance.aabb = meshlet_mesh.aabb;
                             instance.meshlet_offset = base_offset;
                             instance.meshlet_count = meshlet_mesh.meshlets.len() as u32;
@@ -165,6 +145,38 @@ impl World {
 
     pub fn main_camera_mut(&mut self) -> &mut Camera {
         &mut self.cameras[0]
+    }
+
+    pub fn add_instance(
+        &mut self,
+        transform: Transform,
+        meshlet_mesh: ResourceHandle<MeshletMesh>,
+        material: ResourceHandle<Material>,
+    ) -> Option<InstanceHandle> {
+        let (aabb, meshlet_offset, meshlet_count) = match self.asset_server.get(meshlet_mesh) {
+            Some(meshlet_mesh_lock) => {
+                let meshlet_mesh = meshlet_mesh_lock.read();
+                (
+                    meshlet_mesh.aabb,
+                    meshlet_mesh.meshlet_offset,
+                    meshlet_mesh.meshlets.len() as u32,
+                )
+            }
+            None => {
+                self.asset_server.reserve_handle(meshlet_mesh);
+                (Aabb::default(), 0, 0)
+            }
+        };
+
+        self.asset_server.reserve_handle(material);
+        Some(self.instances.add_instance(Instance::new(
+            transform,
+            aabb,
+            meshlet_mesh,
+            meshlet_offset,
+            meshlet_count,
+            material,
+        )))
     }
 
     pub fn get_instance(&self, handle: InstanceHandle) -> Option<&Instance> {
