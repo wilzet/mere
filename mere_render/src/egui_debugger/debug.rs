@@ -515,9 +515,11 @@ fn draw_timing_history(
 
     ui.label(plot_title(label));
 
+    let total_width = ui.available_width();
+
     card_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
-            let graph_width = (ui.available_width() - 170.0).max(120.0);
+            let graph_width = (total_width - 170.0).max(120.0);
 
             let (response, painter) =
                 ui.allocate_painter(egui::vec2(graph_width, height), egui::Sense::hover());
@@ -552,10 +554,11 @@ fn draw_timing_history(
 
                 let mut cursor_y = rect.bottom();
 
-                for (name, start, end) in spans {
+                for (name, start, end) in spans.iter().rev() {
                     let duration_ns = (*end - *start) as f32;
 
-                    let h = (duration_ns / total_ns) * rect.height();
+                    let h =
+                        ((duration_ns / total_ns) * rect.height()).max(6.0 / ui.pixels_per_point());
 
                     let y0 = cursor_y - h;
                     let y1 = cursor_y;
@@ -607,9 +610,13 @@ fn draw_timing_history(
             );
 
             ui.vertical(|ui| {
+                ui.global_style_mut(|style| {
+                    style.spacing.item_spacing = egui::vec2(style.spacing.item_spacing.x, 0.0)
+                });
+
                 let latest = history.back().unwrap();
 
-                for (name, start, end) in latest.iter().rev() {
+                for (name, start, end) in latest.iter() {
                     let duration_ns = (*end - *start) as f32;
 
                     let color = pass_color(name);
@@ -618,12 +625,13 @@ fn draw_timing_history(
                         .fill(PANEL)
                         .stroke(egui::Stroke::new(1.0, BORDER))
                         .corner_radius(6.0)
-                        .inner_margin(6.0)
+                        .inner_margin(egui::Margin::symmetric(6, 2))
+                        .outer_margin(0.0)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.colored_label(color, "■");
+                                ui.colored_label(color, egui::RichText::new("■").size(8.0));
 
-                                ui.label(egui::RichText::new(name).color(color).strong());
+                                ui.label(egui::RichText::new(name).size(8.0).color(color).strong());
                             });
                         })
                         .response

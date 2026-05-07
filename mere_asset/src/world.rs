@@ -10,6 +10,7 @@ use crate::{
     texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
+use mere_log::Profiler;
 use mere_math::{Quat, Transform};
 use mere_mesh::{Aabb, MeshletMesh};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -201,12 +202,19 @@ impl World {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         update_view: bool,
+        profiler: &mut Profiler,
     ) {
+        profiler.begin_cpu("build_instance_buffers");
+
         self.instances.build_instance_buffers();
+
+        profiler.end();
 
         if self.instances.scene_instance_count == 0 || self.meshlets.meshlet_count() == 0 {
             return;
         }
+
+        profiler.begin_cpu("write_instance_buffers");
 
         self.instances.instance_uniforms.write_buffer(device, queue);
         self.instances.instance_aabbs.write_buffer(device, queue);
@@ -219,6 +227,8 @@ impl World {
         self.instances
             .instance_material_ids
             .write_buffer(device, queue);
+
+        profiler.end();
 
         self.meshlets.perform_pending_uploads(device, queue);
 

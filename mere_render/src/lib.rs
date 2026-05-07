@@ -210,7 +210,7 @@ impl State {
 
         let (device, queue) = self.mere_renderer.get_device_queue();
         self.world
-            .prepare_meshlet_resources(device, queue, !self.lock_view);
+            .prepare_meshlet_resources(device, queue, !self.lock_view, &mut self.profiler);
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
