@@ -1,7 +1,7 @@
-use super::profiler::{Profiler, ResolvedSpan};
 use crate::camera::CameraController;
 use egui_plot::{Line, Plot, PlotPoints};
 use mere_asset::World;
+use mere_log::{Profiler, ResolvedSpan};
 use std::{
     collections::{HashSet, VecDeque},
     time::Duration,

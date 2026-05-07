@@ -1,10 +1,10 @@
 use crate::{
     CLUSTER_SLOTS,
-    egui_debugger::Profiler,
     lights::LightUniform,
     pipeline::{create_compute_pipeline, create_render_pipeline},
 };
 use mere_asset::{InstanceStorage, Material, ResourceStorage, Texture, World};
+use mere_log::Profiler;
 use mere_math::{Quat, Vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;

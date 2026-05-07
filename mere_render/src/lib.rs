@@ -1,9 +1,6 @@
-use crate::{
-    camera::CameraController,
-    egui_debugger::{EguiRenderer, Profiler},
-    renderer::Renderer,
-};
+use crate::{camera::CameraController, egui_debugger::EguiRenderer, renderer::Renderer};
 use mere_asset::{Camera, Material, World};
+use mere_log::Profiler;
 use mere_math::{Transform, Vec3};
 use std::{sync::Arc, time::Duration};
 use winit::{

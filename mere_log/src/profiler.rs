@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-pub(crate) type ResolvedSpan = (String, u128, u128);
+pub type ResolvedSpan = (String, u128, u128);
 
-pub struct CpuSpan {
-    pub(crate) name: &'static str,
-    pub(crate) start: Instant,
-    pub(crate) end: Instant,
+struct CpuSpan {
+    name: &'static str,
+    start: Instant,
+    end: Instant,
 }
 
 struct GpuSpan {
@@ -43,7 +43,6 @@ struct FrameData {
     spans: Vec<GpuSpan>,
     resolve_buffer: wgpu::Buffer,
     readback_buffer: wgpu::Buffer,
-    // This is the key: we track if this specific frame has been submitted yet
     submission_index: Option<wgpu::SubmissionIndex>,
 }
 
@@ -55,6 +54,8 @@ pub struct Profiler {
     frames: [FrameData; 2],
     frame_index: usize,
 }
+
+pub struct EndId(u32);
 
 const MAX_QUERIES: u32 = 64;
 
@@ -93,12 +94,26 @@ impl Profiler {
     }
 
     pub fn begin<'a, T: ResolveTimestamp<'a>>(&'a mut self, name: &'static str) -> Option<T> {
-        if !self.enabled {
+        if !self.begin_cpu(name) {
             return None;
+        }
+
+        let id = self.begin_gpu(name)?;
+
+        Some(ResolveTimestamp::into(&self.timestamp_queries, id))
+    }
+
+    pub fn begin_cpu(&mut self, name: &'static str) -> bool {
+        if !self.enabled {
+            return false;
         }
 
         self.current_cpu_start = Some((Instant::now(), name));
 
+        true
+    }
+
+    fn begin_gpu(&mut self, name: &'static str) -> Option<u32> {
         let frame = &mut self.frames[self.frame_index];
         if frame.query_count + 2 > MAX_QUERIES {
             return None;
@@ -113,7 +128,23 @@ impl Profiler {
             end_query: id + 1,
         });
 
-        Some(ResolveTimestamp::into(&self.timestamp_queries, id))
+        Some(id)
+    }
+
+    pub fn write_timestamp_begin(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        name: &'static str,
+    ) -> Option<EndId> {
+        let id = self.begin_gpu(name)?;
+
+        encoder.write_timestamp(&self.timestamp_queries, id);
+
+        Some(EndId(id + 1))
+    }
+
+    pub fn write_timestamp_end(&mut self, encoder: &mut wgpu::CommandEncoder, id: EndId) {
+        encoder.write_timestamp(&self.timestamp_queries, id.0);
     }
 
     pub fn end(&mut self) {
@@ -198,7 +229,7 @@ impl Profiler {
             timeout: None,
         }) {
             Err(err) => {
-                mere_log::error!("Polling error: {err}");
+                super::error!("Polling error: {err}");
                 return vec![];
             }
             _ => (),

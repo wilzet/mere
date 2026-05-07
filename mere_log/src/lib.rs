@@ -1,4 +1,9 @@
 //! Minimal colored logging macros for MeRe engine (build-time and runtime prints).
+//! This crate also implements a [`Profiler`](profiler::Profiler) that write timestamps for cpu and gpu timings.
+
+mod profiler;
+
+pub use profiler::{Profiler, ResolvedSpan};
 
 pub const RED: &str = "\x1b[31m";
 pub const GREEN: &str = "\x1b[32m";
