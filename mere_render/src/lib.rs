@@ -12,7 +12,6 @@ use winit::{
 
 mod camera;
 mod egui_debugger;
-mod lights;
 mod pipeline;
 mod renderer;
 
@@ -93,9 +92,9 @@ impl State {
         if width > 0 && height > 0 {
             self.mere_renderer.resize(width, height);
 
-            self.world
-                .main_camera_mut()
-                .resize(width as f32 / height as f32);
+            let (device, _) = self.mere_renderer.get_device_queue();
+            let config = self.mere_renderer.get_config();
+            self.world.resize(device, config, width, height);
         }
     }
 
@@ -215,7 +214,7 @@ impl State {
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
 
-        self.mere_renderer.update_light(dt);
+        self.world.update_light(queue, dt);
     }
 
     pub fn render(&mut self, delta_time: Duration) -> anyhow::Result<()> {
@@ -234,7 +233,8 @@ impl State {
             &mut encoder,
             self.world.instances(),
             self.world.resources(),
-            &material,
+            &material.bind_group,
+            &self.world.light_bind_group,
             &mut self.profiler,
         );
 

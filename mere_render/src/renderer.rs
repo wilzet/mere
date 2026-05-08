@@ -1,13 +1,7 @@
-use crate::{
-    CLUSTER_SLOTS,
-    lights::LightUniform,
-    pipeline::{create_compute_pipeline, create_render_pipeline},
-};
-use mere_asset::{InstanceStorage, Material, ResourceStorage, Texture, World};
+use crate::{CLUSTER_SLOTS, pipeline::Pipelines};
+use mere_asset::{InstanceStorage, ResourceStorage, World};
 use mere_log::Profiler;
-use mere_math::{Quat, Vec3};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 pub struct Renderer {
@@ -16,14 +10,8 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
-    instance_cull_pipeline: wgpu::ComputePipeline,
-    cluster_cull_pipeline: wgpu::ComputePipeline,
-    raster_pipeline: wgpu::RenderPipeline,
-    depth_texture: Texture,
+    pipelines: Pipelines,
     bg_color: wgpu::Color,
-    light_uniform: LightUniform,
-    light_buffer: wgpu::Buffer,
-    light_bind_group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -71,8 +59,6 @@ impl Renderer {
             })
             .await?;
 
-        let world = World::new(&device, &queue, CLUSTER_SLOTS);
-
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -96,106 +82,9 @@ impl Renderer {
             view_formats: vec![],
         };
 
-        let light_uniform = LightUniform {
-            position: [1.5, 2.0, 1.5],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
+        let world = World::new(&device, &queue, &config, CLUSTER_SLOTS);
 
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-        });
-
-        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
-
-        let instance_cull_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("instance_cull_pipeline_layout"),
-                bind_group_layouts: &[
-                    Some(&world.resources().instance_cull_bind_group_layout),
-                    Some(&world.resources().render_view_bind_group_layout),
-                ],
-                immediate_size: 0,
-            });
-
-            create_compute_pipeline(
-                Some("instance_cull_pipeline"),
-                &device,
-                Some(&layout),
-                wgpu::include_wgsl!("cull_instances.wgsl"),
-                "cull_instances",
-            )
-        };
-
-        let cluster_cull_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("cluster_cull_pipeline_layout"),
-                bind_group_layouts: &[
-                    Some(&world.resources().cluster_cull_bind_group_layout),
-                    Some(&world.resources().render_view_bind_group_layout),
-                ],
-                immediate_size: 0,
-            });
-
-            create_compute_pipeline(
-                Some("cluster_cull_pipeline"),
-                &device,
-                Some(&layout),
-                wgpu::include_wgsl!("cull_clusters.wgsl"),
-                "cull_clusters",
-            )
-        };
-
-        let raster_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("raster_pipeline_layout"),
-                bind_group_layouts: &[
-                    Some(&world.resources().render_view_bind_group_layout),
-                    Some(&light_bind_group_layout),
-                    Some(Material::material_bind_group_layout(&device)),
-                    Some(&world.resources().meshlet_mesh_material_bind_group_layout),
-                ],
-                immediate_size: 0,
-            });
-
-            create_render_pipeline(
-                Some("raster_pipeline"),
-                &device,
-                &layout,
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                &[],
-                Some(wgpu::BlendState::REPLACE),
-                wgpu::include_wgsl!("meshlet_debug.wgsl"),
-            )
-        };
+        let pipelines = Pipelines::new(&device, &config, &world);
 
         Ok((
             Self {
@@ -204,19 +93,13 @@ impl Renderer {
                 queue,
                 config,
                 is_surface_configured: false,
-                instance_cull_pipeline,
-                cluster_cull_pipeline,
-                raster_pipeline,
-                depth_texture,
+                pipelines,
                 bg_color: wgpu::Color {
                     r: 0.1,
                     g: 0.2,
                     b: 0.3,
                     a: 1.0,
                 },
-                light_uniform,
-                light_buffer,
-                light_bind_group,
             },
             world,
         ))
@@ -227,23 +110,7 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
 
-        self.depth_texture =
-            Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
-
         self.is_surface_configured = true;
-    }
-
-    pub fn update_light(&mut self, delta_time: f32) {
-        let old_position = Vec3::from(self.light_uniform.position);
-        self.light_uniform.position =
-            (Quat::from_axis_angle(Vec3::Y, delta_time * 36.0f32.to_radians()) * old_position)
-                .into();
-
-        self.queue.write_buffer(
-            &self.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.light_uniform]),
-        );
     }
 
     pub fn set_bg_color(&mut self, color: wgpu::Color) {
@@ -306,21 +173,29 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         instances: &InstanceStorage,
         resources: &ResourceStorage,
-        material: &Material,
+        material_bind_group: &Option<wgpu::BindGroup>,
+        light_bind_group: &wgpu::BindGroup,
         profiler: &mut Profiler,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
             return;
         };
 
+        let (
+            instance_cull_pipeline,
+            cluster_cull_pipeline,
+            raster_pipeline,
+            downsample_depth_pipeline,
+        ) = self.pipelines.get();
+
         {
-            let timestamp_writes = profiler.begin("instance_cull_pass");
+            let timestamp_writes = profiler.begin("instance_cull_first_pass");
 
             let mut instance_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("instance_cull_pass"),
+                label: Some("instance_cull_first_pass"),
                 timestamp_writes,
             });
-            instance_cull_pass.set_pipeline(&self.instance_cull_pipeline);
+            instance_cull_pass.set_pipeline(instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
                 &per_frame_resources.bind_groups.instance_cull_bind_group,
@@ -337,13 +212,13 @@ impl Renderer {
         }
 
         {
-            let timestamp_writes = profiler.begin("cluster_cull_pass");
+            let timestamp_writes = profiler.begin("cluster_cull_first_pass");
 
             let mut cluster_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("cluster_cull_pass"),
+                label: Some("cluster_cull_first_pass"),
                 timestamp_writes,
             });
-            cluster_cull_pass.set_pipeline(&self.cluster_cull_pipeline);
+            cluster_cull_pass.set_pipeline(cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
                 &per_frame_resources.bind_groups.cluster_cull_bind_group,
@@ -376,7 +251,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
+                    view: &resources.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -388,14 +263,14 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(&self.raster_pipeline);
+            render_pass.set_pipeline(raster_pipeline);
             render_pass.set_bind_group(
                 0,
                 &per_frame_resources.bind_groups.main_render_view_bind_group,
                 &[],
             );
-            render_pass.set_bind_group(1, &self.light_bind_group, &[]);
-            render_pass.set_bind_group(2, &material.bind_group, &[]);
+            render_pass.set_bind_group(1, light_bind_group, &[]);
+            render_pass.set_bind_group(2, material_bind_group, &[]);
             render_pass.set_bind_group(
                 3,
                 &per_frame_resources

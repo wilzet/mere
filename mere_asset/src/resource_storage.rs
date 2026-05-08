@@ -1,4 +1,4 @@
-use crate::{Camera, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
+use crate::{Camera, Texture, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
 use mere_math::Vec4Swizzles;
 use mere_mesh::Meshlet;
 use wgpu::util::DeviceExt;
@@ -10,6 +10,7 @@ pub struct ResourceStorage {
     pub main_render_view: wgpu::Buffer,
     pub render_view: wgpu::Buffer,
 
+    pub depth_texture: Texture,
     pub meshlet_per_frame_resources: Option<PerFrameResources>,
 
     pub rightmost_slot: u32,
@@ -20,7 +21,11 @@ pub struct ResourceStorage {
 }
 
 impl ResourceStorage {
-    pub fn new(cluster_slots: u32, device: &wgpu::Device) -> Self {
+    pub fn new(
+        cluster_slots: u32,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> Self {
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("meshlet_cluster_info"),
@@ -46,6 +51,7 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+            depth_texture: Texture::create_depth_texture(&device, &config, "depth_texture"),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
             instance_cull_bind_group_layout: device.create_bind_group_layout(
