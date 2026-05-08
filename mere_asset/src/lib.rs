@@ -15,7 +15,7 @@ mod instance_storage;
 mod lights;
 mod material;
 mod meshlet_storage;
-mod resource_storage;
+mod resources;
 mod texture;
 mod world;
 
@@ -23,7 +23,7 @@ pub use {
     camera::Camera,
     instance_storage::{Instance, InstanceStorage},
     material::Material,
-    resource_storage::ResourceStorage,
+    resources::ResourceStorage,
     texture::Texture,
     world::World,
 };

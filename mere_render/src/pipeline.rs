@@ -62,7 +62,7 @@ impl Pipelines {
             create_render_pipeline(
                 Some("raster_pipeline"),
                 &device,
-                &layout,
+                Some(&layout),
                 config.format,
                 Some(Texture::DEPTH_FORMAT),
                 &[],
@@ -72,7 +72,19 @@ impl Pipelines {
         };
 
         let downsample_depth_pipeline = {
-            todo!()
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("depth_downsample_pipeline_layout"),
+                bind_group_layouts: &[Some(&world.resources().depth_downsample_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("depth_downsample_pipeline"),
+                device,
+                Some(&layout),
+                wgpu::include_wgsl!("depth_downsample.wgsl"),
+                "main",
+            )
         };
 
         Self {
@@ -103,7 +115,7 @@ impl Pipelines {
 fn create_render_pipeline(
     label: Option<&str>,
     device: &wgpu::Device,
-    layout: &wgpu::PipelineLayout,
+    layout: Option<&wgpu::PipelineLayout>,
     color_format: wgpu::TextureFormat,
     depth_format: Option<wgpu::TextureFormat>,
     vertex_layouts: &[wgpu::VertexBufferLayout],
@@ -114,7 +126,7 @@ fn create_render_pipeline(
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label,
-        layout: Some(layout),
+        layout,
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),

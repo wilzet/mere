@@ -1,10 +1,9 @@
-use crate::{
-    Camera, Texture, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage,
-    texture::TextureOptions,
-};
-use mere_math::Vec4Swizzles;
+use crate::{camera::Camera, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
 use mere_mesh::Meshlet;
+use render_resources::*;
 use wgpu::util::DeviceExt;
+
+mod render_resources;
 
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
@@ -65,150 +64,113 @@ impl ResourceStorage {
             ),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
-            instance_cull_bind_group_layout: device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("instance_cull_bind_group_layout"),
-                    entries: &[
-                        storage_buffer_layout_entry(0, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(1, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(2, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(3, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(4, wgpu::ShaderStages::COMPUTE, false),
-                        storage_buffer_layout_entry(5, wgpu::ShaderStages::COMPUTE, false),
-                        storage_buffer_layout_entry(6, wgpu::ShaderStages::COMPUTE, false),
-                    ],
-                },
-            ),
-            cluster_cull_bind_group_layout: device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("cluster_cull_bind_group_layout"),
-                    entries: &[
-                        storage_buffer_layout_entry(0, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(1, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(2, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(3, wgpu::ShaderStages::COMPUTE, true),
-                        storage_buffer_layout_entry(4, wgpu::ShaderStages::COMPUTE, false),
-                        storage_buffer_layout_entry(5, wgpu::ShaderStages::COMPUTE, false),
-                    ],
-                },
-            ),
+            instance_cull_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
+                Some("instance_cull_bind_group_layout"),
+                wgpu::ShaderStages::COMPUTE,
+                &mut [
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(false),
+                    storage_buffer(false),
+                    storage_buffer(false),
+                ],
+            )),
+            cluster_cull_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
+                Some("cluster_cull_bind_group_layout"),
+                wgpu::ShaderStages::COMPUTE,
+                &mut [
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(true),
+                    storage_buffer(false),
+                    storage_buffer(false),
+                ],
+            )),
             meshlet_mesh_material_bind_group_layout: device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("meshlet_mesh_material_bind_group_layout"),
-                    entries: &[
-                        storage_buffer_layout_entry(0, wgpu::ShaderStages::VERTEX, true),
-                        storage_buffer_layout_entry(1, wgpu::ShaderStages::VERTEX, true),
-                        storage_buffer_layout_entry(2, wgpu::ShaderStages::VERTEX, true),
-                        storage_buffer_layout_entry(3, wgpu::ShaderStages::VERTEX, true),
-                        storage_buffer_layout_entry(4, wgpu::ShaderStages::VERTEX, true),
-                        storage_buffer_layout_entry(5, wgpu::ShaderStages::VERTEX, true),
+                &Layout::sequential(
+                    Some("meshlet_mesh_material_bind_group_layout"),
+                    wgpu::ShaderStages::VERTEX,
+                    &mut [
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
                     ],
-                },
+                ),
             ),
-            render_view_bind_group_layout: device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("render_view_bind_group_layout"),
-                    entries: &[storage_buffer_layout_entry(
-                        0,
-                        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
-                        true,
-                    )],
-                },
-            ),
+            render_view_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
+                Some("render_view_bind_group_layout"),
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+                &mut [storage_buffer(true)],
+            )),
             depth_downsample_bind_group_layout: device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("depth_downsample_bind_group_layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Depth,
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        storage_texture_layout_entry(
-                            1,
-                            wgpu::ShaderStages::COMPUTE,
+                &Layout::sequential(
+                    Some("depth_downsample_bind_group_layout"),
+                    wgpu::ShaderStages::COMPUTE,
+                    &mut [
+                        entry(wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        }),
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            2,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            3,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            4,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            5,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            6,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::ReadWrite,
                         ),
-                        storage_texture_layout_entry(
-                            7,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            8,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            9,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            10,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            11,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        storage_texture_layout_entry(
-                            12,
-                            wgpu::ShaderStages::COMPUTE,
+                        storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
                         ),
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 13,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                            count: None,
-                        },
+                        entry(wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::NonFiltering,
+                        )),
                     ],
-                },
+                ),
             ),
         }
     }
@@ -399,162 +361,72 @@ impl ResourceStorage {
     }
 }
 
-const fn storage_buffer_layout_entry(
-    binding: u32,
-    visibility: wgpu::ShaderStages,
-    read_only: bool,
+struct Layout;
+
+impl Layout {
+    pub fn sequential<'a, 'b: 'a, 'c: 'a>(
+        label: Option<&'b str>,
+        visibility: wgpu::ShaderStages,
+        partials: &'c mut [wgpu::BindGroupLayoutEntry],
+    ) -> wgpu::BindGroupLayoutDescriptor<'a> {
+        partials.iter_mut().enumerate().for_each(|(i, e)| {
+            e.binding = i as u32;
+            e.visibility = visibility;
+        });
+
+        wgpu::BindGroupLayoutDescriptor {
+            label,
+            entries: partials,
+        }
+    }
+}
+
+const fn entry(ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
+    layout_entry(0, ty)
+}
+
+const fn storage_buffer(read_only: bool) -> wgpu::BindGroupLayoutEntry {
+    storage_buffer_layout_entry(0, read_only)
+}
+
+const fn storage_texture(
+    format: wgpu::TextureFormat,
+    access: wgpu::StorageTextureAccess,
 ) -> wgpu::BindGroupLayoutEntry {
+    storage_texture_layout_entry(0, format, access)
+}
+
+const fn layout_entry(binding: u32, ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
+        visibility: wgpu::ShaderStages::empty(),
+        ty,
+        count: None,
+    }
+}
+
+const fn storage_buffer_layout_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+    layout_entry(
+        binding,
+        wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Storage { read_only },
             has_dynamic_offset: false,
             min_binding_size: None,
         },
-        count: None,
-    }
+    )
 }
 
 const fn storage_texture_layout_entry(
     binding: u32,
-    visibility: wgpu::ShaderStages,
     format: wgpu::TextureFormat,
     access: wgpu::StorageTextureAccess,
 ) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
+    layout_entry(
         binding,
-        visibility,
-        ty: wgpu::BindingType::StorageTexture {
+        wgpu::BindingType::StorageTexture {
             access,
             format,
             view_dimension: wgpu::TextureViewDimension::D2,
         },
-        count: None,
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct MeshletBindGroups {
-    pub instance_cull_bind_group: wgpu::BindGroup,
-    pub cluster_cull_bind_group: wgpu::BindGroup,
-    pub meshlet_mesh_material_bind_group: wgpu::BindGroup,
-    pub main_render_view_bind_group: wgpu::BindGroup,
-    pub render_view_bind_group: wgpu::BindGroup,
-}
-
-#[derive(Clone, Debug)]
-pub struct PerFrameResources {
-    pub indirect_cluster_args: wgpu::Buffer,
-    pub indirect_draw_args: wgpu::Buffer,
-    pub bind_groups: MeshletBindGroups,
-}
-
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-#[repr(C)]
-pub struct RenderView {
-    view_position: [f32; 4],
-    view_proj: [[f32; 4]; 4],
-    frustum: [[f32; 4]; 6],
-}
-
-impl RenderView {
-    pub fn from_camera(camera: &Camera) -> Self {
-        let view_proj = camera.projection_matrix() * camera.view_matrix();
-
-        let row = |i: usize| view_proj.row(i);
-
-        let mut planes = [
-            (row(3) + row(0)), // Left
-            (row(3) - row(0)), // Right
-            (row(3) + row(1)), // Bottom
-            (row(3) - row(1)), // Top
-            (row(3) + row(2)), // Near
-            (row(3) - row(2)), // Far
-        ];
-
-        for plane in planes.iter_mut() {
-            let length = plane.xyz().length();
-            *plane /= length;
-        }
-
-        Self {
-            view_position: camera.transform.translation.to_homogeneous().into(),
-            view_proj: view_proj.to_cols_array_2d(),
-            frustum: planes.map(|p| p.to_array()),
-        }
-    }
-}
-
-const DEPTH_PYRAMID_COUNT: usize = 12;
-
-#[derive(Clone, Debug)]
-pub struct DepthPyramid {
-    pub depth: Texture,
-    pub depth_pyramid: Texture,
-    pub depth_pyramid_mips: [Option<wgpu::TextureView>; DEPTH_PYRAMID_COUNT],
-    pub mip_count: u32,
-}
-
-impl DepthPyramid {
-    pub fn new(
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        label: &str,
-        width: u32,
-        height: u32,
-    ) -> Self {
-        let size = wgpu::Extent3d {
-            width: width.next_power_of_two() / 2,
-            height: height.next_power_of_two() / 2,
-            depth_or_array_layers: 1,
-        };
-
-        let mip_count = size.max_mips(wgpu::TextureDimension::D2);
-
-        let depth_pyramid = Texture::create_texture(
-            label,
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size,
-                mip_level_count: mip_count,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            }),
-            TextureOptions::default(),
-            device,
-        );
-
-        let depth_pyramid_mips = std::array::from_fn(|i| {
-            if (i as u32) < mip_count {
-                Some(
-                    depth_pyramid
-                        .texture()
-                        .create_view(&wgpu::TextureViewDescriptor {
-                            label: Some(label),
-                            format: Some(wgpu::TextureFormat::R32Float),
-                            dimension: Some(wgpu::TextureViewDimension::D2),
-                            usage: None,
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: i as u32,
-                            mip_level_count: Some(1),
-                            base_array_layer: 0,
-                            array_layer_count: Some(1),
-                        }),
-                )
-            } else {
-                None
-            }
-        });
-
-        Self {
-            depth: Texture::create_depth_texture(&device, &config, "depth_texture"),
-            depth_pyramid,
-            depth_pyramid_mips,
-            mip_count,
-        }
-    }
+    )
 }

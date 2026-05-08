@@ -7,7 +7,7 @@ use crate::{
     lights::LightUniform,
     material::Material,
     meshlet_storage::MeshletStorage,
-    resource_storage::ResourceStorage,
+    resources::ResourceStorage,
     texture::{MipmapOptions, Texture, TextureOptions},
 };
 use mere_common::ASSET_DIR;
