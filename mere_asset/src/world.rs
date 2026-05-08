@@ -252,8 +252,7 @@ impl World {
         height: u32,
     ) {
         self.main_camera_mut().resize(width as f32 / height as f32);
-        self.resources.depth_texture =
-            Texture::create_depth_texture(device, config, "depth_texture");
+        self.resources.resize(device, config, width, height);
     }
 
     pub fn prepare_meshlet_resources(

@@ -77,7 +77,7 @@ impl Default for MipmapOptions {
     fn default() -> Self {
         Self {
             levels: MipmapLevels::None,
-            filter: wgpu::MipmapFilterMode::Linear,
+            filter: wgpu::MipmapFilterMode::Nearest,
             anisotropy: unsafe {
                 // SAFETY: 1 is not 0 (trust me)
                 NonZero::new_unchecked(1)
@@ -351,6 +351,15 @@ impl Texture {
             }
         }
 
+        Ok(Self::create_texture(label, texture, options, device))
+    }
+
+    pub fn create_texture(
+        label: &str,
+        texture: wgpu::Texture,
+        options: TextureOptions,
+        device: &wgpu::Device,
+    ) -> Self {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: options.address_mode,
@@ -363,11 +372,15 @@ impl Texture {
             ..Default::default()
         });
 
-        Ok(Self {
+        Self {
             label: label.to_string(),
             view,
             sampler,
-        })
+        }
+    }
+
+    pub fn texture(&self) -> &wgpu::Texture {
+        self.view.texture()
     }
 
     pub fn bind_group_entry_view(&self, binding: u32) -> wgpu::BindGroupEntry<'_> {

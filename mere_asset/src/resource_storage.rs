@@ -1,4 +1,7 @@
-use crate::{Camera, Texture, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
+use crate::{
+    Camera, Texture, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage,
+    texture::TextureOptions,
+};
 use mere_math::Vec4Swizzles;
 use mere_mesh::Meshlet;
 use wgpu::util::DeviceExt;
@@ -10,7 +13,7 @@ pub struct ResourceStorage {
     pub main_render_view: wgpu::Buffer,
     pub render_view: wgpu::Buffer,
 
-    pub depth_texture: Texture,
+    pub depth_pyramid: DepthPyramid,
     pub meshlet_per_frame_resources: Option<PerFrameResources>,
 
     pub rightmost_slot: u32,
@@ -18,6 +21,8 @@ pub struct ResourceStorage {
     pub cluster_cull_bind_group_layout: wgpu::BindGroupLayout,
     pub meshlet_mesh_material_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
+
+    pub depth_downsample_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl ResourceStorage {
@@ -51,7 +56,13 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            depth_texture: Texture::create_depth_texture(&device, &config, "depth_texture"),
+            depth_pyramid: DepthPyramid::new(
+                device,
+                config,
+                "depth_pyramid",
+                config.width,
+                config.height,
+            ),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
             instance_cull_bind_group_layout: device.create_bind_group_layout(
@@ -102,6 +113,101 @@ impl ResourceStorage {
                         wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
                         true,
                     )],
+                },
+            ),
+            depth_downsample_bind_group_layout: device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("depth_downsample_bind_group_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Depth,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        storage_texture_layout_entry(
+                            1,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            2,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            3,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            4,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            5,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            6,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::ReadWrite,
+                        ),
+                        storage_texture_layout_entry(
+                            7,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            8,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            9,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            10,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            11,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        storage_texture_layout_entry(
+                            12,
+                            wgpu::ShaderStages::COMPUTE,
+                            wgpu::TextureFormat::R32Float,
+                            wgpu::StorageTextureAccess::WriteOnly,
+                        ),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                            count: None,
+                        },
+                    ],
                 },
             ),
         }
@@ -275,6 +381,22 @@ impl ResourceStorage {
             );
         }
     }
+
+    pub fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        width: u32,
+        height: u32,
+    ) {
+        self.depth_pyramid = DepthPyramid::new(
+            device,
+            config,
+            &self.depth_pyramid.depth.label,
+            width,
+            height,
+        )
+    }
 }
 
 const fn storage_buffer_layout_entry(
@@ -289,6 +411,24 @@ const fn storage_buffer_layout_entry(
             ty: wgpu::BufferBindingType::Storage { read_only },
             has_dynamic_offset: false,
             min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+const fn storage_texture_layout_entry(
+    binding: u32,
+    visibility: wgpu::ShaderStages,
+    format: wgpu::TextureFormat,
+    access: wgpu::StorageTextureAccess,
+) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::StorageTexture {
+            access,
+            format,
+            view_dimension: wgpu::TextureViewDimension::D2,
         },
         count: None,
     }
@@ -342,6 +482,79 @@ impl RenderView {
             view_position: camera.transform.translation.to_homogeneous().into(),
             view_proj: view_proj.to_cols_array_2d(),
             frustum: planes.map(|p| p.to_array()),
+        }
+    }
+}
+
+const DEPTH_PYRAMID_COUNT: usize = 12;
+
+#[derive(Clone, Debug)]
+pub struct DepthPyramid {
+    pub depth: Texture,
+    pub depth_pyramid: Texture,
+    pub depth_pyramid_mips: [Option<wgpu::TextureView>; DEPTH_PYRAMID_COUNT],
+    pub mip_count: u32,
+}
+
+impl DepthPyramid {
+    pub fn new(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        label: &str,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width: width.next_power_of_two() / 2,
+            height: height.next_power_of_two() / 2,
+            depth_or_array_layers: 1,
+        };
+
+        let mip_count = size.max_mips(wgpu::TextureDimension::D2);
+
+        let depth_pyramid = Texture::create_texture(
+            label,
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size,
+                mip_level_count: mip_count,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
+            TextureOptions::default(),
+            device,
+        );
+
+        let depth_pyramid_mips = std::array::from_fn(|i| {
+            if (i as u32) < mip_count {
+                Some(
+                    depth_pyramid
+                        .texture()
+                        .create_view(&wgpu::TextureViewDescriptor {
+                            label: Some(label),
+                            format: Some(wgpu::TextureFormat::R32Float),
+                            dimension: Some(wgpu::TextureViewDimension::D2),
+                            usage: None,
+                            aspect: wgpu::TextureAspect::All,
+                            base_mip_level: i as u32,
+                            mip_level_count: Some(1),
+                            base_array_layer: 0,
+                            array_layer_count: Some(1),
+                        }),
+                )
+            } else {
+                None
+            }
+        });
+
+        Self {
+            depth: Texture::create_depth_texture(&device, &config, "depth_texture"),
+            depth_pyramid,
+            depth_pyramid_mips,
+            mip_count,
         }
     }
 }
