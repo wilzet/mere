@@ -232,11 +232,15 @@ impl World {
 
         self.meshlets.perform_pending_uploads(device, queue);
 
+        profiler.begin_cpu("update_per_frame_resources");
+
         self.resources
             .update_render_view(queue, &self.cameras[0], update_view);
 
         self.resources
             .generate_frame_resources(device, &self.meshlets, &self.instances);
+
+        profiler.end();
     }
 }
 

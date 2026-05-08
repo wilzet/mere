@@ -327,7 +327,7 @@ fn draw_perf_section(
                 }
             }
 
-            draw_timing_history(ui, "CPU Timings", &debug_memory.cpu_history, 120.0);
+            draw_timing_history(ui, "CPU Timings", &debug_memory.cpu_history);
 
             let gpu_spans = profiler.gpu_spans(device, queue);
 
@@ -338,7 +338,7 @@ fn draw_perf_section(
                 }
             }
 
-            draw_timing_history(ui, "GPU Timings", &debug_memory.gpu_history, 120.0);
+            draw_timing_history(ui, "GPU Timings", &debug_memory.gpu_history);
 
             ui.add_space(6.0);
 
@@ -507,7 +507,6 @@ fn draw_timing_history(
     ui: &mut egui::Ui,
     label: &str,
     history: &VecDeque<Vec<(String, u128, u128)>>,
-    height: f32,
 ) {
     if history.is_empty() {
         return;
@@ -515,14 +514,17 @@ fn draw_timing_history(
 
     ui.label(plot_title(label));
 
-    let total_width = ui.available_width();
-
     card_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
+        let total_width = ui.available_width();
+
+        let max_stack_depth = history.iter().map(|spans| spans.len()).max().unwrap_or(1);
+        let graph_height = (max_stack_depth as f32 * 16.0).clamp(120.0, 500.0);
+
+        ui.horizontal_top(|ui| {
             let graph_width = (total_width - 170.0).max(120.0);
 
             let (response, painter) =
-                ui.allocate_painter(egui::vec2(graph_width, height), egui::Sense::hover());
+                ui.allocate_painter(egui::vec2(graph_width, graph_height), egui::Sense::hover());
 
             let rect = response.rect;
 
