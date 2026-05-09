@@ -18,10 +18,11 @@ pub struct ResourceStorage {
     pub rightmost_slot: u32,
     pub instance_cull_bind_group_layout: wgpu::BindGroupLayout,
     pub cluster_cull_bind_group_layout: wgpu::BindGroupLayout,
-    pub meshlet_mesh_material_bind_group_layout: wgpu::BindGroupLayout,
+    pub visibility_buffer_raster_bind_group_layout: wgpu::BindGroupLayout,
+    pub meshlet_read_attributes_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
 
-    pub depth_downsample_bind_group_layout: wgpu::BindGroupLayout,
+    pub downsample_depth_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl ResourceStorage {
@@ -55,43 +56,43 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            depth_pyramid: DepthPyramid::new(
-                device,
-                config,
-                "depth_pyramid",
-                config.width,
-                config.height,
-            ),
+            depth_pyramid: DepthPyramid::new(device, "depth_pyramid", config.width, config.height),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
-            instance_cull_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
-                Some("instance_cull_bind_group_layout"),
-                wgpu::ShaderStages::COMPUTE,
-                &mut [
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(false),
-                    storage_buffer(false),
-                    storage_buffer(false),
-                ],
-            )),
-            cluster_cull_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
-                Some("cluster_cull_bind_group_layout"),
-                wgpu::ShaderStages::COMPUTE,
-                &mut [
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(true),
-                    storage_buffer(false),
-                    storage_buffer(false),
-                ],
-            )),
-            meshlet_mesh_material_bind_group_layout: device.create_bind_group_layout(
+            instance_cull_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
-                    Some("meshlet_mesh_material_bind_group_layout"),
+                    Some("instance_cull_bind_group_layout"),
+                    wgpu::ShaderStages::COMPUTE,
+                    &mut [
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(false),
+                        storage_buffer(false),
+                        storage_buffer(false),
+                    ],
+                )
+                .get(),
+            ),
+            cluster_cull_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("cluster_cull_bind_group_layout"),
+                    wgpu::ShaderStages::COMPUTE,
+                    &mut [
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(false),
+                        storage_buffer(false),
+                    ],
+                )
+                .get(),
+            ),
+            visibility_buffer_raster_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("visibilit_buffer_raster_bind_group_layout"),
                     wgpu::ShaderStages::VERTEX,
                     &mut [
                         storage_buffer(true),
@@ -101,23 +102,50 @@ impl ResourceStorage {
                         storage_buffer(true),
                         storage_buffer(true),
                     ],
-                ),
+                )
+                .with({
+                    let mut entry = storage_texture(
+                        wgpu::TextureFormat::R64Uint,
+                        wgpu::StorageTextureAccess::Atomic,
+                    );
+                    entry.visibility = wgpu::ShaderStages::FRAGMENT;
+                    entry
+                })
+                .get(),
             ),
-            render_view_bind_group_layout: device.create_bind_group_layout(&Layout::sequential(
-                Some("render_view_bind_group_layout"),
-                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
-                &mut [storage_buffer(true)],
-            )),
-            depth_downsample_bind_group_layout: device.create_bind_group_layout(
+            meshlet_read_attributes_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
-                    Some("depth_downsample_bind_group_layout"),
+                    Some("meshlet_read_attributes_bind_group_layout"),
+                    wgpu::ShaderStages::VERTEX,
+                    &mut [
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_buffer(true),
+                    ],
+                )
+                .get(),
+            ),
+            render_view_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("render_view_bind_group_layout"),
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+                    &mut [storage_buffer(true)],
+                )
+                .get(),
+            ),
+            downsample_depth_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("downsample_depth_bind_group_layout"),
                     wgpu::ShaderStages::COMPUTE,
                     &mut [
-                        entry(wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Depth,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        }),
+                        storage_texture(
+                            wgpu::TextureFormat::R64Uint,
+                            wgpu::StorageTextureAccess::ReadOnly,
+                        ),
                         storage_texture(
                             wgpu::TextureFormat::R32Float,
                             wgpu::StorageTextureAccess::WriteOnly,
@@ -170,7 +198,8 @@ impl ResourceStorage {
                             wgpu::SamplerBindingType::NonFiltering,
                         )),
                     ],
-                ),
+                )
+                .get(),
             ),
         }
     }
@@ -178,9 +207,42 @@ impl ResourceStorage {
     pub fn generate_frame_resources(
         &mut self,
         device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
         meshlets: &MeshletStorage,
         instances: &InstanceStorage,
     ) {
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+
+        let visibility_buffer = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("visibility_buffer"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R64Uint,
+                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let dummy_render_target = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("dummy_render_target"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Uint,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
         let visible_instance_cluster_count =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("visible_instance_cluster_count"),
@@ -271,10 +333,10 @@ impl ResourceStorage {
                     },
                 ],
             }),
-            meshlet_mesh_material_bind_group: device.create_bind_group(
+            visibility_buffer_raster_bind_group: device.create_bind_group(
                 &wgpu::BindGroupDescriptor {
-                    label: Some("meshlet_mesh_material_bind_group"),
-                    layout: &self.meshlet_mesh_material_bind_group_layout,
+                    label: Some("visibility_buffer_raster_bind_group"),
+                    layout: &self.visibility_buffer_raster_bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -300,6 +362,46 @@ impl ResourceStorage {
                             binding: 5,
                             resource: self.visible_cluster_info.as_entire_binding(),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                        },
+                    ],
+                },
+            ),
+            meshlet_read_attributes_bind_group: device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("meshlet_read_attributes_bind_group"),
+                    layout: &self.meshlet_read_attributes_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: meshlets.vertices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: meshlets.vertex_attrbiutes.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: meshlets.vertex_indices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: meshlets.indices.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: meshlets.meshlets.binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: instances.instance_uniforms.binding().unwrap(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: self.visible_cluster_info.as_entire_binding(),
+                        },
                     ],
                 },
             ),
@@ -319,9 +421,96 @@ impl ResourceStorage {
                     resource: self.render_view.as_entire_binding(),
                 }],
             }),
+            downsample_depth_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("downsample_depth_bind_group"),
+                layout: &self.downsample_depth_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[0],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[1],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[2],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[3],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[4],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[5],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[6],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[7],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[8],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[9],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[10],
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.depth_pyramid.depth_pyramid_mips[11],
+                        ),
+                    },
+                    self.depth_pyramid
+                        .depth_pyramid
+                        .bind_group_entry_sampler(13),
+                ],
+            }),
         };
 
         self.meshlet_per_frame_resources = Some(PerFrameResources {
+            visibility_buffer,
+            dummy_render_target,
             indirect_cluster_args,
             indirect_draw_args,
             bind_groups,
@@ -344,39 +533,50 @@ impl ResourceStorage {
         }
     }
 
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        width: u32,
-        height: u32,
-    ) {
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         self.depth_pyramid = DepthPyramid::new(
             device,
-            config,
-            &self.depth_pyramid.depth.label,
+            &self.depth_pyramid.depth_pyramid.label,
             width,
             height,
         )
     }
 }
 
-struct Layout;
+struct Layout<'a> {
+    label: Option<&'a str>,
+    entries: Vec<wgpu::BindGroupLayoutEntry>,
+}
 
-impl Layout {
-    pub fn sequential<'a, 'b: 'a, 'c: 'a>(
-        label: Option<&'b str>,
+impl<'a> Layout<'a> {
+    fn sequential(
+        label: Option<&'a str>,
         visibility: wgpu::ShaderStages,
-        partials: &'c mut [wgpu::BindGroupLayoutEntry],
-    ) -> wgpu::BindGroupLayoutDescriptor<'a> {
-        partials.iter_mut().enumerate().for_each(|(i, e)| {
-            e.binding = i as u32;
-            e.visibility = visibility;
-        });
+        entries: &[wgpu::BindGroupLayoutEntry],
+    ) -> Self {
+        let entries = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let mut entry = layout_entry(i as u32, e.ty);
+                entry.visibility = visibility;
+                entry
+            })
+            .collect();
 
+        Self { label, entries }
+    }
+
+    fn with(&mut self, mut entry: wgpu::BindGroupLayoutEntry) -> &mut Self {
+        entry.binding = self.entries.len() as u32;
+        self.entries.push(entry);
+        self
+    }
+
+    fn get(&self) -> wgpu::BindGroupLayoutDescriptor<'_> {
         wgpu::BindGroupLayoutDescriptor {
-            label,
-            entries: partials,
+            label: self.label,
+            entries: &self.entries,
         }
     }
 }

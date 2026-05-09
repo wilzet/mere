@@ -1,10 +1,11 @@
-use mere_asset::{Material, Texture, World};
+use mere_asset::{Material, World};
 
 pub struct Pipelines {
     instance_cull_pipeline: wgpu::ComputePipeline,
     cluster_cull_pipeline: wgpu::ComputePipeline,
-    raster_pipeline: wgpu::RenderPipeline,
+    visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
     downsample_depth_pipeline: wgpu::ComputePipeline,
+    material_pipeline: wgpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -47,51 +48,71 @@ impl Pipelines {
             )
         };
 
-        let raster_pipeline = {
+        let visibility_buffer_raster_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("raster_pipeline_layout"),
+                label: Some("vsibility_buffer_raster_pipeline_layout"),
                 bind_group_layouts: &[
                     Some(&world.resources().render_view_bind_group_layout),
-                    Some(&world.light_bind_group_layout),
-                    Some(Material::material_bind_group_layout(&device)),
-                    Some(&world.resources().meshlet_mesh_material_bind_group_layout),
+                    Some(&world.resources().visibility_buffer_raster_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
 
             create_render_pipeline(
-                Some("raster_pipeline"),
+                Some("visibility_buffer_raster_pipeline"),
                 &device,
                 Some(&layout),
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
+                wgpu::TextureFormat::R8Uint,
                 &[],
-                Some(wgpu::BlendState::REPLACE),
-                wgpu::include_wgsl!("meshlet_debug.wgsl"),
+                None,
+                wgpu::include_wgsl!("visibility_buffer_raster.wgsl"),
             )
         };
 
         let downsample_depth_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("depth_downsample_pipeline_layout"),
-                bind_group_layouts: &[Some(&world.resources().depth_downsample_bind_group_layout)],
-                immediate_size: 0,
+                label: Some("downsample_depth_pipeline_layout"),
+                bind_group_layouts: &[Some(&world.resources().downsample_depth_bind_group_layout)],
+                immediate_size: 4,
             });
 
             create_compute_pipeline(
-                Some("depth_downsample_pipeline"),
+                Some("downsample_depth_pipeline"),
                 device,
                 Some(&layout),
-                wgpu::include_wgsl!("depth_downsample.wgsl"),
-                "main",
+                wgpu::include_wgsl!("downsample_depth.wgsl"),
+                "downsample_depth_first",
+            )
+        };
+
+        let material_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("material_pipeline_layout"),
+                bind_group_layouts: &[
+                    Some(&world.resources().render_view_bind_group_layout),
+                    Some(&world.resources().visibility_buffer_raster_bind_group_layout),
+                    Some(Material::material_bind_group_layout(device)),
+                ],
+                immediate_size: 0,
+            });
+
+            create_render_pipeline(
+                Some("material_pipeline"),
+                device,
+                Some(&layout),
+                config.format,
+                &[],
+                Some(wgpu::BlendState::REPLACE),
+                wgpu::include_wgsl!("material.wgsl"),
             )
         };
 
         Self {
             instance_cull_pipeline,
             cluster_cull_pipeline,
-            raster_pipeline,
+            visibility_buffer_raster_pipeline,
             downsample_depth_pipeline,
+            material_pipeline,
         }
     }
 
@@ -102,12 +123,14 @@ impl Pipelines {
         &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
         &wgpu::ComputePipeline,
+        &wgpu::RenderPipeline,
     ) {
         (
             &self.instance_cull_pipeline,
             &self.cluster_cull_pipeline,
-            &self.raster_pipeline,
+            &self.visibility_buffer_raster_pipeline,
             &self.downsample_depth_pipeline,
+            &self.material_pipeline,
         )
     }
 }
@@ -117,7 +140,6 @@ fn create_render_pipeline(
     device: &wgpu::Device,
     layout: Option<&wgpu::PipelineLayout>,
     color_format: wgpu::TextureFormat,
-    depth_format: Option<wgpu::TextureFormat>,
     vertex_layouts: &[wgpu::VertexBufferLayout],
     blend: Option<wgpu::BlendState>,
     shader: wgpu::ShaderModuleDescriptor,
@@ -152,13 +174,7 @@ fn create_render_pipeline(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
-            format,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+        depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,

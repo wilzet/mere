@@ -97,16 +97,6 @@ pub struct TextureOptions {
 }
 
 impl TextureOptions {
-    fn depth() -> Self {
-        Self {
-            format: Texture::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        }
-    }
-
     pub fn texture(format: wgpu::TextureFormat) -> Self {
         Self {
             format,
@@ -167,53 +157,6 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-    pub fn create_depth_texture(
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        label: &str,
-    ) -> Self {
-        let options = TextureOptions::depth();
-
-        let size = wgpu::Extent3d {
-            width: config.width.max(1),
-            height: config.height.max(1),
-            depth_or_array_layers: 1,
-        };
-
-        let desc = wgpu::TextureDescriptor {
-            label: Some(label),
-            size,
-            mip_level_count: options.mipmap.levels(),
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: options.format,
-            usage: options.usage,
-            view_formats: &[],
-        };
-
-        let texture = device.create_texture(&desc);
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: options.address_mode,
-            address_mode_v: options.address_mode,
-            address_mode_w: options.address_mode,
-            mag_filter: options.mag_filter,
-            min_filter: options.min_filter,
-            mipmap_filter: options.mipmap.filter(),
-            compare: Some(wgpu::CompareFunction::LessEqual),
-            ..Default::default()
-        });
-
-        Self {
-            label: label.to_string(),
-            view,
-            sampler,
-        }
-    }
-
     fn from_bytes_to_raw_image(
         width: u32,
         height: u32,

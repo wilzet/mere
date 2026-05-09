@@ -5,28 +5,12 @@ struct RenderView {
     planes: array<vec4<f32>, 6>,
 }
 
-struct Light {
-    position: vec3<f32>,
-    color: vec3<f32>,
-}
-
-struct MaterialProperties {
-    color: vec4<f32>,
-    normal_scale: f32,
-    roughness: f32,
-    metalness: f32,
-}
-
 // --- Vertex shader ---
 
 @group(0) @binding(0) var<storage, read> main_camera: RenderView;
-@group(1) @binding(0) var<uniform> light: Light;
 
 struct Vertex {
     position: array<f32, 3>,
-    normal: u32,
-    tex_coord: u32,
-    tangent: u32,
 }
 
 struct BoundingSphere {
@@ -58,27 +42,20 @@ struct ClusterInfo {
     meshlet_id: u32,
 }
 
-@group(3) @binding(0) var<storage, read> vertices: array<Vertex>;
-@group(3) @binding(1) var<storage, read> meshlet_vertex_indices: array<u32>;
-@group(3) @binding(2) var<storage, read> meshlet_indices: array<u32>;
+@group(1) @binding(0) var<storage, read> vertices: array<Vertex>;
+@group(1) @binding(1) var<storage, read> meshlet_vertex_indices: array<u32>;
+@group(1) @binding(2) var<storage, read> meshlet_indices: array<u32>;
 
-@group(3) @binding(3) var<storage, read> meshlets: array<Meshlet>;
-@group(3) @binding(4) var<storage, read> instances: array<MeshUniform>;
-@group(3) @binding(5) var<storage, read> cluster_info: array<ClusterInfo>;
+@group(1) @binding(3) var<storage, read> meshlets: array<Meshlet>;
+@group(1) @binding(4) var<storage, read> instances: array<MeshUniform>;
+@group(1) @binding(5) var<storage, read> cluster_info: array<ClusterInfo>;
+
+@group(1) @binding(6) var visibility_buffer: texture_storage_2d<r64uint, atomic>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) @interpolate(flat) packed_id: u32,
 };
-
-fn hash_color(id: u32) -> vec3<f32> {
-    let x = f32(id);
-    return fract(vec3<f32>(
-        sin(x * 12.9898) * 43758.5453,
-        sin(x * 78.233) * 43758.5453,
-        sin(x * 39.425) * 43758.5453
-    ));
-}
 
 @vertex
 fn vs_main(
@@ -92,13 +69,7 @@ fn vs_main(
     let instance = instances[instance_id];
     let meshlet = meshlets[meshlet_id];
 
-    // guard against overflow (important!)
-    if index_id >= meshlet.index_count {
-        // push off-screen
-        var out: VertexOutput;
-        out.clip_position = vec4(0.0);
-        return out;
-    }
+    if index_id >= meshlet.index_count { return dummy_vertex(); }
 
     let byte_offset = meshlet.index_offset + index_id;
     let word_offset = byte_offset / 4u;
@@ -116,24 +87,28 @@ fn vs_main(
     let world_position = instance.model_matrix * position;
 
     out.clip_position = main_camera.view_proj * world_position;
-
-    // DEBUG: color per meshlet
-    out.color = hash_color(meshlet_id + 1);
+    out.packed_id = (cluster_id << 7) | (index_id / 3);
 
     return out;
 }
 
+fn dummy_vertex() -> VertexOutput {
+    return VertexOutput(
+        vec4(divide(0.0, 0.0)),
+        0,
+    );
+}
+
+fn divide(a: f32, b: f32) -> f32 {
+    return a / b;
+}
+
 // --- Fragment Shader ---
 
-@group(2) @binding(0) var t_diffuse: texture_2d<f32>;
-@group(2) @binding(1) var s_diffuse: sampler;
-@group(2) @binding(2) var t_normal: texture_2d<f32>;
-@group(2) @binding(3) var s_normal: sampler;
-@group(2) @binding(4) var t_rough_metal: texture_2d<f32>;
-@group(2) @binding(5) var s_rough_metal: sampler;
-@group(2) @binding(6) var<uniform> properties: MaterialProperties;
-
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color, 1.0);
+fn fs_main(in: VertexOutput) {
+    let depth = bitcast<u32>(in.clip_position.z);
+    let visibility = (u64(depth) << 32) | u64(in.packed_id);
+
+    textureAtomicMax(visibility_buffer, vec2<u32>(in.clip_position.xy), visibility);
 }

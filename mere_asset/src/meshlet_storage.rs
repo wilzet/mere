@@ -1,21 +1,23 @@
 use crate::{gpu_buffer::GpuBuffer, handle::ResourceHandle};
 use core::ops::Range;
-use mere_mesh::{Meshlet, MeshletMesh, Vertex};
+use mere_mesh::{Meshlet, MeshletMesh, Vertex, VertexAttributes};
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug)]
 pub struct MeshletStorage {
     pub vertices: GpuBuffer<Arc<[Vertex]>>,
+    pub vertex_attrbiutes: GpuBuffer<Arc<[VertexAttributes]>>,
     pub vertex_indices: GpuBuffer<Arc<[u32]>>,
     pub indices: GpuBuffer<Arc<[u8]>>,
     pub meshlets: GpuBuffer<Arc<[Meshlet]>>,
-    meshlet_mesh_slices: HashMap<ResourceHandle<MeshletMesh>, [Range<wgpu::BufferAddress>; 4]>,
+    meshlet_mesh_slices: HashMap<ResourceHandle<MeshletMesh>, [Range<wgpu::BufferAddress>; 5]>,
 }
 
 impl MeshletStorage {
     pub fn new(device: &wgpu::Device) -> Self {
         Self {
             vertices: GpuBuffer::new(Some("meshlet_vertices"), device),
+            vertex_attrbiutes: GpuBuffer::new(Some("meshlet_vertex_attributes"), device),
             vertex_indices: GpuBuffer::new(Some("meshlet_vertex_indices"), device),
             indices: GpuBuffer::new(Some("meshlet_indices"), device),
             meshlets: GpuBuffer::new(Some("meshlets"), device),
@@ -31,6 +33,9 @@ impl MeshletStorage {
         let handle = ResourceHandle::from(mesh.name.as_str());
         self.meshlet_mesh_slices.entry(handle).or_insert_with(|| {
             let vertices_slice = self.vertices.queue_write(Arc::clone(&mesh.vertices), ());
+            let vertex_attributes_slice = self
+                .vertex_attrbiutes
+                .queue_write(Arc::clone(&mesh.vertex_attributes), ());
 
             let adjusted_vertex_indices = mesh
                 .meshlet_vertex_indices
@@ -54,6 +59,7 @@ impl MeshletStorage {
 
             [
                 vertices_slice,
+                vertex_attributes_slice,
                 vertex_indices_slice,
                 indices_slice,
                 meshlets_slice,
@@ -67,6 +73,7 @@ impl MeshletStorage {
         if let Some(
             [
                 vertices_slice,
+                vertex_attributes_slice,
                 vertex_indices_slice,
                 indices_slice,
                 meshlets_slice,
@@ -74,6 +81,8 @@ impl MeshletStorage {
         ) = self.meshlet_mesh_slices.remove(&handle)
         {
             self.vertices.mark_slice_unused(vertices_slice);
+            self.vertex_attrbiutes
+                .mark_slice_unused(vertex_attributes_slice);
             self.vertex_indices.mark_slice_unused(vertex_indices_slice);
             self.indices.mark_slice_unused(indices_slice);
             self.meshlets.mark_slice_unused(meshlets_slice);
@@ -82,6 +91,7 @@ impl MeshletStorage {
 
     pub fn perform_pending_uploads(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         self.vertices.perform_writes(device, queue);
+        self.vertex_attrbiutes.perform_writes(device, queue);
         self.vertex_indices.perform_writes(device, queue);
         self.indices.perform_writes(device, queue);
         self.meshlets.perform_writes(device, queue);
@@ -91,6 +101,7 @@ impl MeshletStorage {
         let mut total = 0;
 
         total += self.vertices.size_in_bytes();
+        total += self.vertex_attrbiutes.size_in_bytes();
         total += self.vertex_indices.size_in_bytes();
         total += self.indices.size_in_bytes();
         total += self.meshlets.size_in_bytes();

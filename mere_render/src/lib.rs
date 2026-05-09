@@ -93,8 +93,7 @@ impl State {
             self.mere_renderer.resize(width, height);
 
             let (device, _) = self.mere_renderer.get_device_queue();
-            let config = self.mere_renderer.get_config();
-            self.world.resize(device, config, width, height);
+            self.world.resize(device, width, height);
         }
     }
 
@@ -208,13 +207,17 @@ impl State {
         self.world.process_asset_event();
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        self.world
-            .prepare_meshlet_resources(device, queue, !self.lock_view, &mut self.profiler);
+        let config = self.mere_renderer.get_config();
+        self.world.prepare_meshlet_resources(
+            device,
+            queue,
+            config,
+            !self.lock_view,
+            &mut self.profiler,
+        );
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);
-
-        self.world.update_light(queue, dt);
     }
 
     pub fn render(&mut self, delta_time: Duration) -> anyhow::Result<()> {
@@ -234,7 +237,6 @@ impl State {
             self.world.instances(),
             self.world.resources(),
             &material.bind_group,
-            &self.world.light_bind_group,
             &mut self.profiler,
         );
 

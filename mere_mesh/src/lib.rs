@@ -8,5 +8,5 @@ mod vertex;
 pub use {
     mesh::{Aabb, MeshletMesh, read_mere_file, write_mere_file},
     meshlet::Meshlet,
-    vertex::Vertex,
+    vertex::{Vertex, VertexAttributes},
 };

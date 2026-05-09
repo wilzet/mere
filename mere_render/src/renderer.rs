@@ -44,7 +44,10 @@ impl Renderer {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Rendering device"),
                 required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                    | wgpu::Features::POLYGON_MODE_LINE
+                    | wgpu::Features::TEXTURE_ATOMIC
+                    | wgpu::Features::TEXTURE_INT64_ATOMIC
+                    | wgpu::Features::SHADER_INT64
+                    | wgpu::Features::IMMEDIATES
                     | wgpu::Features::TIMESTAMP_QUERY,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits {
@@ -52,7 +55,8 @@ impl Renderer {
                     max_compute_workgroup_size_y: 1024,
                     max_compute_workgroup_size_z: 64,
                     max_compute_invocations_per_workgroup: 1024,
-                    max_storage_textures_per_shader_stage: 12,
+                    max_storage_textures_per_shader_stage: 16,
+                    max_immediate_size: 4,
                     ..Default::default()
                 },
                 memory_hints: Default::default(),
@@ -162,7 +166,7 @@ impl Renderer {
         let encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
+                label: Some("meshlet_render_encoder"),
             });
 
         Ok(Some((output, view, encoder)))
@@ -175,7 +179,6 @@ impl Renderer {
         instances: &InstanceStorage,
         resources: &ResourceStorage,
         material_bind_group: &Option<wgpu::BindGroup>,
-        light_bind_group: &wgpu::BindGroup,
         profiler: &mut Profiler,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
@@ -185,8 +188,9 @@ impl Renderer {
         let (
             instance_cull_pipeline,
             cluster_cull_pipeline,
-            raster_pipeline,
+            visibility_buffer_raster_pipeline,
             downsample_depth_pipeline,
+            material_pipeline,
         ) = self.pipelines.get();
 
         {
@@ -207,6 +211,7 @@ impl Renderer {
                 &per_frame_resources.bind_groups.render_view_bind_group,
                 &[],
             );
+
             instance_cull_pass.dispatch_workgroups(instances.scene_instance_count, 1, 1);
 
             profiler.end();
@@ -238,49 +243,106 @@ impl Renderer {
         }
 
         {
-            let timestamp_writes = profiler.begin("raster_pass");
+            let timestamp_writes = profiler.begin("visibility_buffer_raster_pass");
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("raster_pass"),
+                label: Some("visibility_buffer_raster_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &per_frame_resources.dummy_render_target,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.bg_color),
-                        store: wgpu::StoreOp::Store,
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Discard,
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &resources.depth_pyramid.depth.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
+                depth_stencil_attachment: None,
                 occlusion_query_set: None,
                 timestamp_writes,
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(raster_pipeline);
+            render_pass.set_pipeline(visibility_buffer_raster_pipeline);
+            render_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.render_view_bind_group,
+                &[],
+            );
+            render_pass.set_bind_group(
+                1,
+                &per_frame_resources
+                    .bind_groups
+                    .visibility_buffer_raster_bind_group,
+                &[],
+            );
+
+            render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
+
+            profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("depth_pyramid_downsample");
+
+            let mut downsample_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("depth_pyramid_downsample"),
+                timestamp_writes,
+            });
+            downsample_pass.set_pipeline(downsample_depth_pipeline);
+            downsample_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.downsample_depth_bind_group,
+                &[],
+            );
+            downsample_pass.set_immediates(0, &resources.depth_pyramid.mip_count.to_le_bytes());
+
+            let size = view.texture().size();
+            let virtual_view_size_x = (size.width + 1).next_power_of_two();
+            let virtual_view_size_y = (size.height + 1).next_power_of_two();
+            downsample_pass.dispatch_workgroups(
+                virtual_view_size_x.div_ceil(64),
+                virtual_view_size_y.div_ceil(64),
+                1,
+            );
+
+            profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("material_pass");
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("material_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.bg_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(material_pipeline);
             render_pass.set_bind_group(
                 0,
                 &per_frame_resources.bind_groups.main_render_view_bind_group,
                 &[],
             );
-            render_pass.set_bind_group(1, light_bind_group, &[]);
-            render_pass.set_bind_group(2, material_bind_group, &[]);
             render_pass.set_bind_group(
-                3,
+                1,
                 &per_frame_resources
                     .bind_groups
-                    .meshlet_mesh_material_bind_group,
+                    .visibility_buffer_raster_bind_group,
                 &[],
             );
-
-            render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
+            render_pass.set_bind_group(2, material_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
 
             profiler.end();
         }

@@ -1,5 +1,5 @@
 use core::ops::Range;
-use mere_mesh::{Meshlet, Vertex};
+use mere_mesh::{Meshlet, Vertex, VertexAttributes};
 use range_alloc::RangeAllocator;
 use std::{num::NonZero, sync::Arc};
 use wgpu::util::DeviceExt;
@@ -211,6 +211,18 @@ impl GpuBufferable for Arc<[Vertex]> {
 
     fn size_in_bytes(&self) -> usize {
         self.len() * size_of::<Vertex>()
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        bytemuck::cast_slice(self)
+    }
+}
+
+impl GpuBufferable for Arc<[VertexAttributes]> {
+    type Metadata = ();
+
+    fn size_in_bytes(&self) -> usize {
+        self.len() * size_of::<VertexAttributes>()
     }
 
     fn as_bytes(&self) -> &[u8] {

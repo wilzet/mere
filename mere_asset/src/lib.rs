@@ -12,7 +12,6 @@ mod camera;
 mod gpu_buffer;
 mod handle;
 mod instance_storage;
-mod lights;
 mod material;
 mod meshlet_storage;
 mod resources;

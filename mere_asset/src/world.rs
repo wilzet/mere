@@ -4,7 +4,6 @@ use crate::{
     camera::Camera,
     handle::ResourceHandle,
     instance_storage::{Instance, InstanceHandle, InstanceStorage},
-    lights::LightUniform,
     material::Material,
     meshlet_storage::MeshletStorage,
     resources::ResourceStorage,
@@ -12,11 +11,10 @@ use crate::{
 };
 use mere_common::ASSET_DIR;
 use mere_log::Profiler;
-use mere_math::{Quat, Transform, Vec3};
+use mere_math::{Quat, Transform};
 use mere_mesh::{Aabb, MeshletMesh};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::path;
-use wgpu::util::DeviceExt;
 
 #[derive(Debug)]
 pub struct World {
@@ -25,61 +23,21 @@ pub struct World {
     instances: InstanceStorage,
     meshlets: MeshletStorage,
     resources: ResourceStorage,
-    light_uniform: LightUniform,
-    light_buffer: wgpu::Buffer,
-    pub light_bind_group_layout: wgpu::BindGroupLayout,
-    pub light_bind_group: wgpu::BindGroup,
 }
 
 impl World {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, config: &wgpu::SurfaceConfiguration, cluster_slots: u32) -> Self {
-        let light_uniform = LightUniform {
-            position: [1.5, 2.0, 1.5],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
-
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-        });
-
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
+        cluster_slots: u32,
+    ) -> Self {
         Self {
             cameras: Vec::new(),
             asset_server: AssetServer::new(device, queue),
             instances: InstanceStorage::new(),
             meshlets: MeshletStorage::new(device),
             resources: ResourceStorage::new(cluster_slots, device, config),
-            light_uniform,
-            light_buffer,
-            light_bind_group_layout,
-            light_bind_group,
         }
     }
 
@@ -244,21 +202,16 @@ impl World {
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
 
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        width: u32,
-        height: u32,
-    ) {
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         self.main_camera_mut().resize(width as f32 / height as f32);
-        self.resources.resize(device, config, width, height);
+        self.resources.resize(device, width, height);
     }
 
     pub fn prepare_meshlet_resources(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
         update_view: bool,
         profiler: &mut Profiler,
     ) {
@@ -296,22 +249,9 @@ impl World {
             .update_render_view(queue, &self.cameras[0], update_view);
 
         self.resources
-            .generate_frame_resources(device, &self.meshlets, &self.instances);
+            .generate_frame_resources(device, config, &self.meshlets, &self.instances);
 
         profiler.end();
-    }
-
-    pub fn update_light(&mut self, queue: &wgpu::Queue, delta_time: f32) {
-        let old_position = Vec3::from(self.light_uniform.position);
-        self.light_uniform.position =
-            (Quat::from_axis_angle(Vec3::Y, delta_time * 36.0f32.to_radians()) * old_position)
-                .into();
-
-        queue.write_buffer(
-            &self.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.light_uniform]),
-        );
     }
 }
 
