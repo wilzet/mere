@@ -6,6 +6,7 @@ use mere_math::Vec4Swizzles;
 
 #[derive(Clone, Debug)]
 pub struct MeshletBindGroups {
+    pub visibility_buffer_clear_bind_group: wgpu::BindGroup,
     pub instance_cull_bind_group: wgpu::BindGroup,
     pub cluster_cull_bind_group: wgpu::BindGroup,
     pub visibility_buffer_raster_bind_group: wgpu::BindGroup,
@@ -27,16 +28,18 @@ pub struct PerFrameResources {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 #[repr(C)]
 pub struct RenderView {
-    view_position: [f32; 4],
+    world_position: [f32; 4],
+    viewport: [f32; 4],
     view_proj: [[f32; 4]; 4],
-    frustum: [[f32; 4]; 6],
+    frustum_planes: [[f32; 4]; 6],
 }
 
 impl RenderView {
     pub fn from_camera(camera: &Camera) -> Self {
         let view_proj = camera.projection_matrix() * camera.view_matrix();
+        let frustum_matrix = camera.frustum_matrix();
 
-        let row = |i: usize| view_proj.row(i);
+        let row = |i: usize| frustum_matrix.row(i);
 
         let mut planes = [
             (row(3) + row(0)), // Left
@@ -53,9 +56,10 @@ impl RenderView {
         }
 
         Self {
-            view_position: camera.transform.translation.to_homogeneous().into(),
+            world_position: camera.transform.translation.to_homogeneous().into(),
+            viewport: camera.viewport.into(),
             view_proj: view_proj.to_cols_array_2d(),
-            frustum: planes.map(|p| p.to_array()),
+            frustum_planes: planes.map(|p| p.to_array()),
         }
     }
 }

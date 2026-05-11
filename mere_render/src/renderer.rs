@@ -56,7 +56,7 @@ impl Renderer {
                     max_compute_workgroup_size_z: 64,
                     max_compute_invocations_per_workgroup: 1024,
                     max_storage_textures_per_shader_stage: 16,
-                    max_immediate_size: 4,
+                    max_immediate_size: 8,
                     ..Default::default()
                 },
                 memory_hints: Default::default(),
@@ -186,12 +186,42 @@ impl Renderer {
         };
 
         let (
+            visibility_buffer_clear_pipeline,
             instance_cull_pipeline,
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
             downsample_depth_pipeline,
             material_pipeline,
         ) = self.pipelines.get();
+
+        {
+            let timestamp_writes = profiler.begin("visibility_buffer_clear_pass");
+
+            let mut visibility_buffer_clear_pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("visibility_buffer_clear_pass"),
+                    timestamp_writes,
+                });
+            visibility_buffer_clear_pass.set_pipeline(visibility_buffer_clear_pipeline);
+            visibility_buffer_clear_pass.set_bind_group(
+                0,
+                &per_frame_resources
+                    .bind_groups
+                    .visibility_buffer_clear_bind_group,
+                &[],
+            );
+            let size = view.texture().size();
+            visibility_buffer_clear_pass
+                .set_immediates(0, bytemuck::cast_slice(&[size.width, size.height]));
+
+            visibility_buffer_clear_pass.dispatch_workgroups(
+                size.width.div_ceil(16),
+                size.height.div_ceil(16),
+                1,
+            );
+
+            profiler.end();
+        }
 
         {
             let timestamp_writes = profiler.begin("instance_cull_first_pass");
@@ -248,7 +278,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("visibility_buffer_raster_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &per_frame_resources.dummy_render_target,
+                    view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -265,7 +295,7 @@ impl Renderer {
             render_pass.set_pipeline(visibility_buffer_raster_pipeline);
             render_pass.set_bind_group(
                 0,
-                &per_frame_resources.bind_groups.render_view_bind_group,
+                &per_frame_resources.bind_groups.main_render_view_bind_group,
                 &[],
             );
             render_pass.set_bind_group(
@@ -277,6 +307,52 @@ impl Renderer {
             );
 
             render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
+
+            profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("material_pass");
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("material_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.bg_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &resources.material_depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(material_pipeline);
+            render_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.main_render_view_bind_group,
+                &[],
+            );
+            render_pass.set_bind_group(
+                1,
+                &per_frame_resources
+                    .bind_groups
+                    .meshlet_read_attributes_bind_group,
+                &[],
+            );
+            render_pass.set_bind_group(2, material_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
 
             profiler.end();
         }
@@ -304,45 +380,6 @@ impl Renderer {
                 virtual_view_size_y.div_ceil(64),
                 1,
             );
-
-            profiler.end();
-        }
-
-        {
-            let timestamp_writes = profiler.begin("material_pass");
-
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("material_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.bg_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            render_pass.set_pipeline(material_pipeline);
-            render_pass.set_bind_group(
-                0,
-                &per_frame_resources.bind_groups.main_render_view_bind_group,
-                &[],
-            );
-            render_pass.set_bind_group(
-                1,
-                &per_frame_resources
-                    .bind_groups
-                    .visibility_buffer_raster_bind_group,
-                &[],
-            );
-            render_pass.set_bind_group(2, material_bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
 
             profiler.end();
         }

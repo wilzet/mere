@@ -1,5 +1,6 @@
 struct RenderView {
-    view_pos: vec4<f32>,
+    world_position: vec4<f32>,
+    viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
@@ -30,11 +31,10 @@ struct Meshlet {
 }
 
 struct MeshUniform {
-    model_matrix: mat4x4<f32>,
-    previous_model: mat4x4<f32>,
-    normal_matrix_0: vec4<f32>,
-    normal_matrix_1: vec4<f32>,
-    normal_matrix_2: vec4<f32>,
+    model_matrix: mat3x4<f32>,
+    previous_model: mat3x4<f32>,
+    inverse_transpose_a: array<vec4<f32>, 2>,
+    inverse_transpose_b: vec4<f32>,
 }
 
 struct ClusterInfo {
@@ -53,7 +53,7 @@ struct ClusterInfo {
 @group(1) @binding(6) var visibility_buffer: texture_storage_2d<r64uint, atomic>;
 
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
+    @builtin(position) position: vec4<f32>,
     @location(0) @interpolate(flat) packed_id: u32,
 };
 
@@ -71,25 +71,37 @@ fn vs_main(
 
     if index_id >= meshlet.index_count { return dummy_vertex(); }
 
-    let byte_offset = meshlet.index_offset + index_id;
-    let word_offset = byte_offset / 4u;
-    let bit_offset = (byte_offset % 4u) * 8u;
-
-    // Fetch the 32-bit word and shift/mask to get the u8
-    let packed_indices = meshlet_indices[word_offset];
-    let local_index = (packed_indices >> bit_offset) & 0xFFu;
-
-    let global_index = meshlet_vertex_indices[meshlet.vertex_offset + local_index];
+    let global_index = get_meshlet_vertex_id(meshlet, index_id);
     let v = vertices[global_index];
 
-    var out: VertexOutput;
+    let model_matrix = transpose(mat4x4(
+        instance.model_matrix[0],
+        instance.model_matrix[1],
+        instance.model_matrix[2],
+        vec4(0.0, 0.0, 0.0, 1.0),
+    ));
+
     let position = vec4(v.position[0], v.position[1], v.position[2], 1.0);
-    let world_position = instance.model_matrix * position;
+    let world_position = model_matrix * position;
+    let clip_position = main_camera.view_proj * world_position;
 
-    out.clip_position = main_camera.view_proj * world_position;
-    out.packed_id = (cluster_id << 7) | (index_id / 3);
+    let packed_id = (cluster_id << 7) | (index_id / 3);
 
-    return out;
+    return VertexOutput(
+        clip_position,
+        packed_id,
+    );
+}
+
+fn get_meshlet_vertex_id(meshlet: Meshlet, index_id: u32) -> u32 {
+    let byte_index = meshlet.index_offset + index_id;
+    let word_offset = byte_index / 4u;
+    let bit_offset = (byte_index % 4u) * 8u;
+    
+    let packed = meshlet_indices[word_offset];
+    let local_index = (packed >> bit_offset) & 0xFFu;
+    
+    return meshlet_vertex_indices[meshlet.vertex_offset + local_index];
 }
 
 fn dummy_vertex() -> VertexOutput {
@@ -107,8 +119,8 @@ fn divide(a: f32, b: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) {
-    let depth = bitcast<u32>(in.clip_position.z);
+    let depth = bitcast<u32>(in.position.z);
     let visibility = (u64(depth) << 32) | u64(in.packed_id);
-
-    textureAtomicMax(visibility_buffer, vec2<u32>(in.clip_position.xy), visibility);
+    
+    textureAtomicMax(visibility_buffer, vec2<u32>(in.position.xy), visibility);
 }

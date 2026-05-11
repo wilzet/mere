@@ -1815,6 +1815,7 @@ dependencies = [
  "bytemuck",
  "gltf",
  "half",
+ "mere_log",
  "mere_math",
  "meshopt",
  "wgpu",

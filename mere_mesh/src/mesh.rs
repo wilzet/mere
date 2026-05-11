@@ -10,7 +10,7 @@ use std::{fs, mem, path::Path, sync::Arc};
 #[derive(Clone, Debug, Default)]
 pub struct MeshletMesh {
     pub name: String,
-    pub vertices: Arc<[Vertex]>,
+    pub vertex_positions: Arc<[Vertex]>,
     pub vertex_attributes: Arc<[VertexAttributes]>,
     pub meshlet_vertex_indices: Arc<[u32]>,
     pub meshlet_indices: Arc<[u8]>,
@@ -27,16 +27,16 @@ impl MeshletMesh {
         let indices = meshopt::remap_index_buffer(None, vertices.len(), &vertex_remap);
         let vertices = meshopt::remap_vertex_buffer(&vertices, vertex_count, &vertex_remap);
 
-        let (vertices, vertex_attributes) = split_full_vertex(vertices);
+        let (vertex_positions, vertex_attributes) = split_full_vertex(vertices);
 
-        let aabb = Aabb::from_vertices(&vertices);
+        let aabb = Aabb::from_vertices(&vertex_positions);
 
         let (meshlet_vertex_indices, meshlet_indices, meshlets) =
-            Self::generate_meshlets(&vertices, &indices);
+            Self::generate_meshlets(&vertex_positions, &indices);
 
         Self {
             name: "".to_string(),
-            vertices: vertices.into(),
+            vertex_positions: vertex_positions.into(),
             vertex_attributes: vertex_attributes.into(),
             meshlet_vertex_indices: meshlet_vertex_indices.into(),
             meshlet_indices: meshlet_indices.into(),
@@ -93,13 +93,13 @@ impl MeshletMesh {
         let mut bytes = Vec::new();
 
         // Write header
-        bytes.extend_from_slice(&(self.vertices.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.vertex_positions.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlet_vertex_indices.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlet_indices.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlets.len() as u64).to_le_bytes());
 
         let full_vertices = self
-            .vertices
+            .vertex_positions
             .into_iter()
             .zip(self.vertex_attributes.into_iter())
             .map(|(&p, &a)| FullVertex {
@@ -137,7 +137,7 @@ impl MeshletMesh {
         let offset = 32;
 
         // Read mesh data
-        let v_end = offset + v_len * size_of::<Vertex>();
+        let v_end = offset + v_len * size_of::<FullVertex>();
         let m_v_i_end = v_end + m_v_i_len * size_of::<u32>();
         let m_i_end = m_v_i_end + m_i_len * size_of::<u8>();
         let m_end = m_i_end + m_len * size_of::<Meshlet>();
@@ -163,7 +163,7 @@ impl MeshletMesh {
         Ok((
             Self {
                 name: "".to_string(),
-                vertices: vertices.into(),
+                vertex_positions: vertices.into(),
                 vertex_attributes: vertex_attributes.into(),
                 meshlet_vertex_indices,
                 meshlet_indices,
@@ -187,7 +187,7 @@ impl MeshletMesh {
             .into_u32()
             .collect::<Vec<_>>();
 
-        let (positions, normals, tex_coords, tangents) = match reader.read_tangents() {
+        let (positions, normals, uvs, tangents) = match reader.read_tangents() {
             Some(tangents) => {
                 let positions = reader
                     .read_positions()
@@ -198,7 +198,7 @@ impl MeshletMesh {
                     || vec![pack_11_11_10(Vec3::ZERO); positions.len()],
                     |it| it.map(|n| pack_11_11_10(Vec3::from(n))).collect(),
                 );
-                let tex_coords = reader.read_tex_coords(0).map_or_else(
+                let uvs = reader.read_tex_coords(0).map_or_else(
                     || vec![pack_16_16(Vec2::ZERO); positions.len()],
                     |it| it.into_f32().map(|t| pack_16_16(Vec2::from(t))).collect(),
                 );
@@ -211,7 +211,7 @@ impl MeshletMesh {
                     })
                     .collect::<Vec<_>>();
 
-                (positions, normals, tex_coords, tangents)
+                (positions, normals, uvs, tangents)
             }
             None => {
                 let positions = reader
@@ -223,16 +223,16 @@ impl MeshletMesh {
                     || vec![Vec3::ZERO; positions.len()],
                     |it| it.map(Vec3::from).collect(),
                 );
-                let tex_coords = reader.read_tex_coords(0).map_or_else(
+                let uvs = reader.read_tex_coords(0).map_or_else(
                     || vec![Vec2::ZERO; positions.len()],
                     |it| it.into_f32().map(Vec2::from).collect(),
                 );
-                let tangents = calculate_tangents(&indices, &positions, &normals, &tex_coords);
+                let tangents = calculate_tangents(&indices, &positions, &normals, &uvs);
 
                 let normals = normals.into_iter().map(pack_11_11_10).collect::<Vec<_>>();
-                let tex_coords = tex_coords.into_iter().map(pack_16_16).collect::<Vec<_>>();
+                let uvs = uvs.into_iter().map(pack_16_16).collect::<Vec<_>>();
 
-                (positions, normals, tex_coords, tangents)
+                (positions, normals, uvs, tangents)
             }
         };
 
@@ -244,7 +244,7 @@ impl MeshletMesh {
                 },
                 attributes: VertexAttributes {
                     normal: normals[index],
-                    tex_coord: tex_coords[index],
+                    uv: uvs[index],
                     tangent: tangents[index],
                 },
             }

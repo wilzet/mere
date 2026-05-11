@@ -72,7 +72,7 @@ impl InstanceStorage {
         self.reset();
 
         for (_, instance) in self.instances.iter() {
-            let mesh_uniform = MeshUniform::new(instance.transform);
+            let mesh_uniform = MeshUniform::new(instance.transform, instance.previous_transform);
 
             self.instance_uniforms.get_mut().push(mesh_uniform);
             self.instance_aabbs.get_mut().push(instance.aabb);
@@ -152,29 +152,58 @@ impl Instance {
     }
 }
 
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 #[repr(C)]
 pub struct MeshUniform {
-    pub model: [[f32; 4]; 4],
-    pub previous_model: [[f32; 4]; 4],
-    pub normal: [[f32; 4]; 3],
+    model: [[f32; 4]; 3],
+    previous_model: [[f32; 4]; 3],
+    inverse_transpose_a: [[f32; 4]; 2],
+    inverse_transpose_b: f32,
+    _padding: [f32; 3],
 }
 
+unsafe impl bytemuck::Pod for MeshUniform {}
+unsafe impl bytemuck::Zeroable for MeshUniform {}
+
 impl MeshUniform {
-    pub fn new(transform: Transform) -> Self {
-        let normal = {
-            let m = transform.rotation_matrix().to_cols_array_2d();
-            [
-                [m[0][0], m[0][1], m[0][2], 0.0],
-                [m[1][0], m[1][1], m[1][2], 0.0],
-                [m[2][0], m[2][1], m[2][2], 0.0],
-            ]
+    fn new(transform: Transform, previous_transform: Transform) -> Self {
+        let model = {
+            let [col0, col1, col2, _] = transform.world_from_local_transpose().to_cols_array_2d();
+            [col0.into(), col1.into(), col2.into()]
+        };
+        let previous_model = {
+            let [col0, col1, col2, _] = previous_transform
+                .world_from_local_transpose()
+                .to_cols_array_2d();
+            [col0.into(), col1.into(), col2.into()]
+        };
+        let (inverse_transpose_a, inverse_transpose_b) = {
+            let local_from_world = transform.local_from_world().to_cols_array_2d();
+            (
+                [
+                    [
+                        local_from_world[0][0],
+                        local_from_world[0][1],
+                        local_from_world[0][2],
+                        local_from_world[1][0],
+                    ],
+                    [
+                        local_from_world[1][1],
+                        local_from_world[1][2],
+                        local_from_world[2][0],
+                        local_from_world[2][1],
+                    ],
+                ],
+                local_from_world[2][2],
+            )
         };
 
         Self {
-            model: transform.trs().to_cols_array_2d(),
-            previous_model: transform.trs().to_cols_array_2d(),
-            normal,
+            model,
+            previous_model,
+            inverse_transpose_a,
+            inverse_transpose_b,
+            _padding: [0.0, 0.0, 0.0],
         }
     }
 }

@@ -1,6 +1,7 @@
-use mere_asset::{Material, World};
+use mere_asset::{Material, Texture, World};
 
 pub struct Pipelines {
+    visibility_buffer_clear_pipeline: wgpu::ComputePipeline,
     instance_cull_pipeline: wgpu::ComputePipeline,
     cluster_cull_pipeline: wgpu::ComputePipeline,
     visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
@@ -10,6 +11,24 @@ pub struct Pipelines {
 
 impl Pipelines {
     pub fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, world: &World) -> Self {
+        let visibility_buffer_clear_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("visibility_buffer_clear_pipeline_layout"),
+                bind_group_layouts: &[Some(
+                    &world.resources().visibility_buffer_clear_bind_group_layout,
+                )],
+                immediate_size: 8,
+            });
+
+            create_compute_pipeline(
+                Some("visibility_buffer_clear_pipeline"),
+                device,
+                Some(&layout),
+                wgpu::include_wgsl!("visibility_buffer_clear.wgsl"),
+                "visibility_buffer_clear",
+            )
+        };
+
         let instance_cull_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("instance_cull_pipeline_layout"),
@@ -22,7 +41,7 @@ impl Pipelines {
 
             create_compute_pipeline(
                 Some("instance_cull_pipeline"),
-                &device,
+                device,
                 Some(&layout),
                 wgpu::include_wgsl!("cull_instances.wgsl"),
                 "cull_instances",
@@ -41,7 +60,7 @@ impl Pipelines {
 
             create_compute_pipeline(
                 Some("cluster_cull_pipeline"),
-                &device,
+                device,
                 Some(&layout),
                 wgpu::include_wgsl!("cull_clusters.wgsl"),
                 "cull_clusters",
@@ -60,11 +79,12 @@ impl Pipelines {
 
             create_render_pipeline(
                 Some("visibility_buffer_raster_pipeline"),
-                &device,
+                device,
                 Some(&layout),
-                wgpu::TextureFormat::R8Uint,
-                &[],
+                config.format,
                 None,
+                Some(wgpu::BlendState::REPLACE),
+                wgpu::ColorWrites::empty(),
                 wgpu::include_wgsl!("visibility_buffer_raster.wgsl"),
             )
         };
@@ -90,7 +110,7 @@ impl Pipelines {
                 label: Some("material_pipeline_layout"),
                 bind_group_layouts: &[
                     Some(&world.resources().render_view_bind_group_layout),
-                    Some(&world.resources().visibility_buffer_raster_bind_group_layout),
+                    Some(&world.resources().meshlet_read_attributes_bind_group_layout),
                     Some(Material::material_bind_group_layout(device)),
                 ],
                 immediate_size: 0,
@@ -101,13 +121,15 @@ impl Pipelines {
                 device,
                 Some(&layout),
                 config.format,
-                &[],
+                Some(Texture::DEPTH_FORMAT),
                 Some(wgpu::BlendState::REPLACE),
+                wgpu::ColorWrites::all(),
                 wgpu::include_wgsl!("material.wgsl"),
             )
         };
 
         Self {
+            visibility_buffer_clear_pipeline,
             instance_cull_pipeline,
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
@@ -121,11 +143,13 @@ impl Pipelines {
     ) -> (
         &wgpu::ComputePipeline,
         &wgpu::ComputePipeline,
+        &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
         &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
     ) {
         (
+            &self.visibility_buffer_clear_pipeline,
             &self.instance_cull_pipeline,
             &self.cluster_cull_pipeline,
             &self.visibility_buffer_raster_pipeline,
@@ -140,8 +164,9 @@ fn create_render_pipeline(
     device: &wgpu::Device,
     layout: Option<&wgpu::PipelineLayout>,
     color_format: wgpu::TextureFormat,
-    vertex_layouts: &[wgpu::VertexBufferLayout],
+    depth_format: Option<wgpu::TextureFormat>,
     blend: Option<wgpu::BlendState>,
+    write_mask: wgpu::ColorWrites,
     shader: wgpu::ShaderModuleDescriptor,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(shader);
@@ -153,7 +178,7 @@ fn create_render_pipeline(
             module: &shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: vertex_layouts,
+            buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -161,7 +186,7 @@ fn create_render_pipeline(
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
                 blend,
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
@@ -174,7 +199,13 @@ fn create_render_pipeline(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: None,
+        depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,

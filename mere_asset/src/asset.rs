@@ -49,7 +49,8 @@ impl Asset for MeshletMesh {
         let mut total = size_of::<Self>();
 
         total += self.name.len();
-        total += self.vertices.size_in_bytes();
+        total += self.vertex_positions.size_in_bytes();
+        total += self.vertex_attributes.size_in_bytes();
         total += self.meshlet_vertex_indices.size_in_bytes();
         total += self.meshlet_indices.size_in_bytes();
         total += self.meshlets.size_in_bytes();

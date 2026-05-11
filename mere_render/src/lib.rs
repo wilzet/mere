@@ -60,7 +60,8 @@ impl State {
 
         let mut camera = Camera::new(
             45.0f32.to_radians(),
-            config.width as f32 / config.height as f32,
+            config.width,
+            config.height,
             0.1,
             100.0,
             Vec3::new(1.0, 5.0, -5.0),
@@ -93,7 +94,8 @@ impl State {
             self.mere_renderer.resize(width, height);
 
             let (device, _) = self.mere_renderer.get_device_queue();
-            self.world.resize(device, width, height);
+            let config = self.mere_renderer.get_config();
+            self.world.resize(device, config);
         }
     }
 

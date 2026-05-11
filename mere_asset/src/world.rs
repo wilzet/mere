@@ -202,9 +202,9 @@ impl World {
             .get_with_default(id, Material::DEFAULT_MATERIAL_ID)
     }
 
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.main_camera_mut().resize(width as f32 / height as f32);
-        self.resources.resize(device, width, height);
+    pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+        self.main_camera_mut().resize(config.width, config.height);
+        self.resources.resize(device, config);
     }
 
     pub fn prepare_meshlet_resources(

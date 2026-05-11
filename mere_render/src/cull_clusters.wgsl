@@ -1,16 +1,9 @@
 struct RenderView {
-    view_pos: vec4<f32>,
+    world_position: vec4<f32>,
+    viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
-}
-
-struct MeshUniform {
-    model_matrix: mat4x4<f32>,
-    previous_model: mat4x4<f32>,
-    normal_matrix_0: vec4<f32>,
-    normal_matrix_1: vec4<f32>,
-    normal_matrix_2: vec4<f32>,
 }
 
 struct BoundingSphere {
@@ -24,6 +17,13 @@ struct Meshlet {
     index_count: u32,
     bounds: BoundingSphere,
     parent_bounds: BoundingSphere,
+}
+
+struct MeshUniform {
+    model_matrix: mat3x4<f32>,
+    previous_model: mat3x4<f32>,
+    inverse_transpose_a: array<vec4<f32>, 2>,
+    inverse_transpose_b: vec4<f32>,
 }
 
 struct ClusterInfo {
@@ -53,7 +53,14 @@ fn should_cull(instance_id: u32, meshlet: Meshlet) -> bool {
     let bounds = meshlet.bounds;
     let m = instances[instance_id].model_matrix;
 
-    let center = (m * vec4(bounds.center_radius.xyz, 1.0)).xyz;
+    let model_matrix = transpose(mat4x4(
+        m[0],
+        m[1],
+        m[2],
+        vec4(0.0, 0.0, 0.0, 1.0),
+    ));
+
+    let center = (model_matrix * vec4(bounds.center_radius.xyz, 1.0)).xyz;
 
     let scale = max(
         length(m[0].xyz),
@@ -66,7 +73,7 @@ fn should_cull(instance_id: u32, meshlet: Meshlet) -> bool {
         let plane = render_view.planes[i];
         let distance = dot(plane.xyz, center) + plane.w;
 
-        if (distance < -radius) {
+        if distance < -radius {
             return true;
         }
     }
@@ -80,7 +87,7 @@ fn cull_clusters(
 ) {
     let cluster_id = global_id.x;
 
-    if (cluster_id >= visible_instance_cluster_count) { return; }
+    if cluster_id >= visible_instance_cluster_count { return; }
 
     let info = cluster_info[cluster_id];
     let instance_id = info.instance_id;
@@ -91,6 +98,6 @@ fn cull_clusters(
 
     if should_cull(instance_id, meshlet) { return; }
 
-    let id  = atomicAdd(&indirect_args.instance_count, 1u);
+    let id = atomicAdd(&indirect_args.instance_count, 1u);
     visible_cluster_info[id] = info;
 }

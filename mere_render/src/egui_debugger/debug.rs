@@ -513,10 +513,9 @@ fn draw_timing_history(
     }
 
     ui.label(plot_title(label));
+    let total_width = ui.available_width();
 
     card_frame().show(ui, |ui| {
-        let total_width = ui.available_width();
-
         let max_stack_depth = history.iter().map(|spans| spans.len()).max().unwrap_or(1);
         let graph_height = (max_stack_depth as f32 * 16.0).clamp(120.0, 500.0);
 

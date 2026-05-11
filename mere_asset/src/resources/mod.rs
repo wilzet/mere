@@ -1,4 +1,7 @@
-use crate::{camera::Camera, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage};
+use crate::{
+    camera::Camera, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage,
+    texture::Texture,
+};
 use mere_mesh::Meshlet;
 use render_resources::*;
 use wgpu::util::DeviceExt;
@@ -12,10 +15,13 @@ pub struct ResourceStorage {
     pub main_render_view: wgpu::Buffer,
     pub render_view: wgpu::Buffer,
 
+    pub visibility_buffer: wgpu::Texture,
+    pub material_depth: Texture,
     pub depth_pyramid: DepthPyramid,
     pub meshlet_per_frame_resources: Option<PerFrameResources>,
 
     pub rightmost_slot: u32,
+    pub visibility_buffer_clear_bind_group_layout: wgpu::BindGroupLayout,
     pub instance_cull_bind_group_layout: wgpu::BindGroupLayout,
     pub cluster_cull_bind_group_layout: wgpu::BindGroupLayout,
     pub visibility_buffer_raster_bind_group_layout: wgpu::BindGroupLayout,
@@ -56,9 +62,40 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+            visibility_buffer: {
+                let size = wgpu::Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                };
+
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("visibility_buffer"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R64Uint,
+                    usage: wgpu::TextureUsages::STORAGE_ATOMIC
+                        | wgpu::TextureUsages::STORAGE_BINDING,
+                    view_formats: &[],
+                })
+            },
+            material_depth: Texture::create_depth_texture(device, config, "material_depth_texture"),
             depth_pyramid: DepthPyramid::new(device, "depth_pyramid", config.width, config.height),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
+            visibility_buffer_clear_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("visibility_buffer_clear_bind_group_layout"),
+                    wgpu::ShaderStages::COMPUTE,
+                    &mut [storage_texture(
+                        wgpu::TextureFormat::R64Uint,
+                        wgpu::StorageTextureAccess::WriteOnly,
+                    )],
+                )
+                .get(),
+            ),
             instance_cull_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
                     Some("instance_cull_bind_group_layout"),
@@ -92,7 +129,7 @@ impl ResourceStorage {
             ),
             visibility_buffer_raster_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
-                    Some("visibilit_buffer_raster_bind_group_layout"),
+                    Some("visibility_buffer_raster_bind_group_layout"),
                     wgpu::ShaderStages::VERTEX,
                     &mut [
                         storage_buffer(true),
@@ -116,7 +153,7 @@ impl ResourceStorage {
             meshlet_read_attributes_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
                     Some("meshlet_read_attributes_bind_group_layout"),
-                    wgpu::ShaderStages::VERTEX,
+                    wgpu::ShaderStages::FRAGMENT,
                     &mut [
                         storage_buffer(true),
                         storage_buffer(true),
@@ -125,6 +162,10 @@ impl ResourceStorage {
                         storage_buffer(true),
                         storage_buffer(true),
                         storage_buffer(true),
+                        storage_texture(
+                            wgpu::TextureFormat::R64Uint,
+                            wgpu::StorageTextureAccess::ReadOnly,
+                        ),
                     ],
                 )
                 .get(),
@@ -132,7 +173,7 @@ impl ResourceStorage {
             render_view_bind_group_layout: device.create_bind_group_layout(
                 &Layout::sequential(
                     Some("render_view_bind_group_layout"),
-                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+                    wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     &mut [storage_buffer(true)],
                 )
                 .get(),
@@ -217,17 +258,8 @@ impl ResourceStorage {
             depth_or_array_layers: 1,
         };
 
-        let visibility_buffer = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("visibility_buffer"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R64Uint,
-                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
-                view_formats: &[],
-            })
+        let visibility_buffer = self
+            .visibility_buffer
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let dummy_render_target = device
@@ -265,10 +297,22 @@ impl ResourceStorage {
                 first_instance: 0,
             }
             .as_bytes(),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         let bind_groups = MeshletBindGroups {
+            visibility_buffer_clear_bind_group: device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("visibility_buffer_clear_bind_group"),
+                    layout: &self.visibility_buffer_clear_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                    }],
+                },
+            ),
             instance_cull_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("instance_cull_bind_group"),
                 layout: &self.instance_cull_bind_group_layout,
@@ -340,7 +384,7 @@ impl ResourceStorage {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: meshlets.vertices.binding(),
+                            resource: meshlets.vertex_positions.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -376,11 +420,11 @@ impl ResourceStorage {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: meshlets.vertices.binding(),
+                            resource: meshlets.vertex_positions.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: meshlets.vertex_attrbiutes.binding(),
+                            resource: meshlets.vertex_attributes.binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
@@ -401,6 +445,10 @@ impl ResourceStorage {
                         wgpu::BindGroupEntry {
                             binding: 6,
                             resource: self.visible_cluster_info.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
                         },
                     ],
                 },
@@ -533,12 +581,33 @@ impl ResourceStorage {
         }
     }
 
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+    pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+        self.visibility_buffer = {
+            let size = wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            };
+
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("visibility_buffer"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R64Uint,
+                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+        };
+
+        self.material_depth = Texture::create_depth_texture(device, config, "material_depth_texture");
+
         self.depth_pyramid = DepthPyramid::new(
             device,
             &self.depth_pyramid.depth_pyramid.label,
-            width,
-            height,
+            config.width,
+            config.height,
         )
     }
 }

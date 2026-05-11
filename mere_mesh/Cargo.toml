@@ -8,6 +8,7 @@ anyhow.workspace = true
 bytemuck.workspace = true
 gltf.workspace = true
 half = "2.7.1"
+mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 meshopt.workspace = true
 wgpu.workspace = true

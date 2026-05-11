@@ -1,4 +1,4 @@
-use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
+use glam::{Affine3, EulerRot, Mat3, Mat4, Quat, Vec3};
 use std::ops::Mul;
 
 /// TRS transform in 3D space (translation, rotation, scale).
@@ -64,18 +64,8 @@ impl Transform {
     }
 
     #[inline]
-    pub fn trs(&self) -> Mat4 {
-        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
-    }
-
-    #[inline]
     pub fn inverse(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation).inverse()
-    }
-
-    #[inline]
-    pub fn rotation_matrix(&self) -> Mat3 {
-        Mat3::from_quat(self.rotation)
     }
 
     #[inline]
@@ -96,6 +86,17 @@ impl Transform {
     #[inline]
     pub fn euler_angles(&self) -> Vec3 {
         self.rotation.to_euler(EulerRot::XYZ).into()
+    }
+
+    #[inline]
+    pub fn world_from_local_transpose(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
+            .transpose()
+    }
+
+    #[inline]
+    pub fn local_from_world(&self) -> Mat3 {
+        Affine3::from_mat4(self.inverse()).matrix3.transpose()
     }
 }
 

@@ -1,5 +1,6 @@
 struct RenderView {
-    view_pos: vec4<f32>,
+    world_position: vec4<f32>,
+    viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
@@ -15,11 +16,10 @@ struct Aabb {
 }
 
 struct MeshUniform {
-    model_matrix: mat4x4<f32>,
-    previous_model: mat4x4<f32>,
-    normal_matrix_0: vec4<f32>,
-    normal_matrix_1: vec4<f32>,
-    normal_matrix_2: vec4<f32>,
+    model_matrix: mat3x4<f32>,
+    previous_model: mat3x4<f32>,
+    inverse_transpose_a: array<vec4<f32>, 2>,
+    inverse_transpose_b: vec4<f32>,
 }
 
 struct ClusterInfo {
@@ -49,10 +49,17 @@ var<workgroup> shared_cluster_base: u32;
 fn should_cull_instance(instance_id: u32, local_aabb: Aabb) -> bool {
     let m = instances[instance_id].model_matrix;
 
+    let model_matrix = transpose(mat4x4(
+        m[0],
+        m[1],
+        m[2],
+        vec4(0.0, 0.0, 0.0, 1.0),
+    ));
+
     let local_center = vec3(local_aabb.center_x, local_aabb.center_y, local_aabb.center_z);
     let local_extents = vec3(local_aabb.extents_x, local_aabb.extents_y, local_aabb.extents_z);
 
-    let world_center = (m * vec4(local_center, 1.0)).xyz;
+    let world_center = (model_matrix * vec4(local_center, 1.0)).xyz;
     let world_extents = vec3(
         dot(abs(m[0].xyz), local_extents),
         dot(abs(m[1].xyz), local_extents),
