@@ -1,3 +1,4 @@
+use crate::Debug;
 use debug::DebugMemory;
 use egui::Context;
 use egui_wgpu::Renderer;
@@ -90,6 +91,7 @@ impl EguiRenderer {
     pub fn debug_window(
         &mut self,
         profiler: &mut Profiler,
+        debug: &mut Debug,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         window: &Window,
@@ -99,6 +101,7 @@ impl EguiRenderer {
     ) {
         debug::debugger(
             &mut self.debug_memory,
+            debug,
             profiler,
             device,
             queue,

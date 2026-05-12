@@ -28,8 +28,9 @@ pub struct ResourceStorage {
     pub meshlet_read_attributes_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
     pub resolve_material_depth_bind_group_layout: wgpu::BindGroupLayout,
-
     pub downsample_depth_bind_group_layout: wgpu::BindGroupLayout,
+
+    pub debug_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl ResourceStorage {
@@ -262,6 +263,21 @@ impl ResourceStorage {
                     ],
                 )
                 .get(),
+            ),
+            debug_bind_group_layout: device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("debug_bind_group_layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                },
             ),
         }
     }

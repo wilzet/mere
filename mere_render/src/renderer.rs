@@ -1,5 +1,5 @@
-use crate::{CLUSTER_SLOTS, pipeline::Pipelines};
-use mere_asset::{InstanceStorage, Material, ResourceStorage, World};
+use crate::{CLUSTER_SLOTS, Debug, pipeline::Pipelines};
+use mere_asset::{InstanceStorage, MaterialData, ResourceStorage, World};
 use mere_log::Profiler;
 use std::sync::Arc;
 use winit::window::Window;
@@ -178,8 +178,9 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         instances: &InstanceStorage,
         resources: &ResourceStorage,
-        material: &Material,
+        materials: &[MaterialData],
         profiler: &mut Profiler,
+        debug: &Debug,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
             return;
@@ -384,10 +385,13 @@ impl Renderer {
                     .meshlet_read_attributes_bind_group,
                 &[],
             );
-            render_pass.set_bind_group(2, &material.bind_group, &[]);
+            render_pass.set_bind_group(3, Some(&debug.bind_group), &[]);
 
-            let x = material.id * 3;
-            render_pass.draw(x..(x + 3), 0..1);
+            for material in materials {
+                render_pass.set_bind_group(2, Some(material.bind_group.as_ref()), &[]);
+                let x = material.id * 3;
+                render_pass.draw(x..(x + 3), 0..1);
+            }
 
             profiler.end();
         }

@@ -21,7 +21,7 @@ mod world;
 pub use {
     camera::Camera,
     instance_storage::{Instance, InstanceStorage},
-    material::Material,
+    material::{Material, MaterialData},
     resources::ResourceStorage,
     texture::Texture,
     world::World,

@@ -1,8 +1,9 @@
 use crate::{camera::CameraController, egui_debugger::EguiRenderer, renderer::Renderer};
-use mere_asset::{Camera, Material, World};
+use mere_asset::{Camera, World};
 use mere_log::Profiler;
 use mere_math::{Transform, Vec3};
 use std::{sync::Arc, time::Duration};
+use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::ActiveEventLoop,
@@ -17,6 +18,59 @@ mod renderer;
 
 pub const CLUSTER_SLOTS: u32 = 1 << 20;
 
+#[derive(PartialEq, Clone, Copy, Default, Debug)]
+pub enum DebugMode {
+    #[default]
+    CLUSTERS,
+    SHADED,
+    TRIANGLES,
+    INSTANCES,
+    MATERIALS,
+}
+
+impl DebugMode {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::SHADED => "Shaded",
+            Self::CLUSTERS => "Clusters",
+            Self::TRIANGLES => "Triangles",
+            Self::INSTANCES => "Instances",
+            Self::MATERIALS => "Materials",
+        }
+    }
+}
+
+pub struct Debug {
+    pub mode: DebugMode,
+    pub debug_buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+}
+
+impl Debug {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        let debug_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("debug_buffer"),
+            contents: bytemuck::cast_slice(&[0u32]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let debug_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("debug_bind_group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: debug_buffer.as_entire_binding(),
+            }],
+        });
+
+        Self {
+            mode: DebugMode::default(),
+            debug_buffer,
+            bind_group: debug_bind_group,
+        }
+    }
+}
+
 pub struct State {
     mere_renderer: Renderer,
     window: Arc<Window>,
@@ -27,6 +81,7 @@ pub struct State {
     lock_view: bool,
     egui_renderer: EguiRenderer,
     profiler: Profiler,
+    debug: Debug,
 }
 
 impl State {
@@ -74,6 +129,8 @@ impl State {
         let egui_renderer = EguiRenderer::new(&device, config.format, None, 1, &window);
         let profiler = Profiler::new(device);
 
+        let debug = Debug::new(device, &world.resources().debug_bind_group_layout);
+
         mere_log::success!("State initialization complete.");
 
         Ok(Self {
@@ -86,6 +143,7 @@ impl State {
             lock_view: false,
             egui_renderer,
             profiler,
+            debug,
         })
     }
 
@@ -230,16 +288,15 @@ impl State {
 
         let (device, queue) = self.mere_renderer.get_device_queue();
 
-        let material_lock = self.world.get_material(Material::DEFAULT_MATERIAL_ID);
-        let material = material_lock.read();
-
+        let materials = self.world.materials();
         self.mere_renderer.render(
             &view,
             &mut encoder,
             self.world.instances(),
             self.world.resources(),
-            &material,
+            &materials,
             &mut self.profiler,
+            &self.debug,
         );
 
         {
@@ -249,6 +306,7 @@ impl State {
 
             self.egui_renderer.debug_window(
                 &mut self.profiler,
+                &mut self.debug,
                 device,
                 queue,
                 &self.window,

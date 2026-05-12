@@ -4,7 +4,7 @@ use crate::{
     camera::Camera,
     handle::ResourceHandle,
     instance_storage::{Instance, InstanceHandle, InstanceStorage},
-    material::Material,
+    material::{Material, MaterialData},
     meshlet_storage::MeshletStorage,
     resources::ResourceStorage,
     texture::{MipmapOptions, Texture, TextureOptions},
@@ -213,6 +213,21 @@ impl World {
 
     pub fn get_meshlet_mesh(&self, id: ResourceHandle<MeshletMesh>) -> Option<Shared<MeshletMesh>> {
         self.asset_server.get(id)
+    }
+
+    pub fn materials(&self) -> Vec<MaterialData> {
+        self.instances
+            .materials_in_scene
+            .iter()
+            .filter_map(|&handle| {
+                let material_lock = self.asset_server.get(handle)?;
+                let material = material_lock.read();
+                Some(MaterialData {
+                    bind_group: material.bind_group.clone()?,
+                    id: material.id,
+                })
+            })
+            .collect()
     }
 
     pub fn get_material(&self, id: ResourceHandle<Material>) -> Shared<Material> {

@@ -147,6 +147,8 @@ struct VertexOutput {
     ddy_uv: vec2<f32>,
     world_tangent: vec4<f32>,
     cluster_id: u32,
+    instance_id: u32,
+    triangle_id: u32,
 }
 
 fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
@@ -157,7 +159,7 @@ fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     let meshlet = meshlets[meshlet_id];
 
     let triangle_id = extractBits(packed_ids, 0, 7);
-    let index_ids = meshlet.index_offset + triangle_id * 3 + vec3(0, 1, 2);
+    let index_ids = triangle_id * 3 + vec3(0, 1, 2);
     let vertex_ids = vec3(get_meshlet_vertex_id(meshlet, index_ids[0]), get_meshlet_vertex_id(meshlet, index_ids[1]), get_meshlet_vertex_id(meshlet, index_ids[2]));
     let vertex_0 = get_vertex(vertex_ids[0]);
     let vertex_1 = get_vertex(vertex_ids[1]);
@@ -227,6 +229,8 @@ fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
         ddy_uv,
         world_tangent,
         instance_id ^ meshlet_id,
+        instance_id,
+        instance_id ^ meshlet_id ^ triangle_id,
     );
 }
 
@@ -321,55 +325,108 @@ fn hash_color(id: u32) -> vec3<f32> {
     ));
 }
 
+struct Debug {
+    mode: u32,
+}
+
+@group(3) @binding(0) var<uniform> debug: Debug;
+
 @fragment
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let vertex_output = get_vertex_output(frag_coord);
-    let cluster_id = vertex_output.cluster_id;
-    let color = hash_color(cluster_id + 1);
 
-    return vec4(color, 1.0);
-    // let albedo_sample = textureSample(t_diffuse, s_diffuse, in.tex_coord);
-    // let albedo = albedo_sample.rgb * properties.color.rgb;
-    // let alpha = albedo_sample.a;
+    switch (debug.mode) {
+        case 0: { // CLUSTERS
+            let cluster_id = vertex_output.cluster_id;
+            let color = hash_color(cluster_id + 1);
 
-    // if alpha < 0.5 {
-    //     discard;
-    // }
+            return vec4(color, 1.0);
+        }
+        case 1: { // SHADED
+            let uv = vertex_output.uv.xy;
 
-    // let rm = textureSample(t_rough_metal, s_rough_metal, in.tex_coord);
-    // let roughness = rm.g * properties.roughness;
-    // let metalness = rm.b * properties.metalness;
+            let albedo_sample = textureSample(t_diffuse, s_diffuse, uv);
+            let albedo = albedo_sample.rgb * properties.color.rgb;
+            let alpha = albedo_sample.a;
 
-    // let raw_normal = textureSample(t_normal, s_normal, in.tex_coord) * 2.0 - 1.0;
-    // let N = normalize(vec3(raw_normal.xy * properties.normal_scale, raw_normal.z));
+            if alpha < 0.5 {
+                discard;
+            }
 
-    // let V = normalize(in.tangent_view_dir);
-    // let L = normalize(in.tangent_light_dir);
-    // let H = normalize(V + L);
+            let rm = textureSample(t_rough_metal, s_rough_metal, uv);
+            let roughness = rm.g * properties.roughness;
+            let metalness = rm.b * properties.metalness;
 
-    // let NdotV = max(dot(N, V), 0.0);
-    // let NdotL = max(dot(N, L), 0.0);
-    // let HdotV = max(dot(N, H), 0.0);
+            let raw_normal = textureSample(t_normal, s_normal, uv) * 2.0 - 1.0;
+            let N = normalize(vec3(raw_normal.xy * properties.normal_scale, raw_normal.z));
 
-    // let F0 = mix(vec3(0.04), albedo, metalness);
+            let world_normal = vertex_output.world_normal;
+            let world_tangent = vertex_output.world_tangent;
+            let world_bitangent = normalize(cross(world_normal, world_tangent.xyz) * world_tangent.w);
+            let tbn_matrix = transpose(mat3x3(world_tangent.xyz, world_bitangent, world_normal));
 
-    // let D = distributionGGX(N, H, roughness);
-    // let G = geometrySmith(NdotV, NdotL, roughness);
-    // let F = fresnelSchlick(HdotV, F0);
+            const light_pos: vec3<f32> = vec3(-5.0, -5.0, 10.0);
+            const light_color: vec3<f32> = vec3(1.0, 1.0, 1.0);
 
-    // let denom = 4.0 * NdotV * NdotL + 0.0001;
-    // let specular = D * G * F / denom;
+            let world_position = vertex_output.world_position;
 
-    // let kS = F;
-    // let kD = (1.0 - kS) * (1.0 - metalness);
+            let view_dir_world = main_camera.world_position.xyz - world_position.xyz;
+            let light_dir_world = light_pos - world_position.xyz;
+            let tangent_view_dir = tbn_matrix * view_dir_world;
+            let tangent_light_dir = tbn_matrix * light_dir_world;
 
-    // let diffuse = kD * albedo / PI;
-    // let lo = (diffuse + specular) * light.color * NdotL;
-    // let ambient = vec3(0.03) * albedo;
+            let V = normalize(tangent_view_dir);
+            let L = normalize(tangent_light_dir);
+            let H = normalize(V + L);
 
-    // let color = ambient + lo;
+            let NdotV = max(dot(N, V), 0.0);
+            let NdotL = max(dot(N, L), 0.0);
+            let HdotV = max(dot(N, H), 0.0);
 
-    // return vec4(color, properties.color.a);
+            let F0 = mix(vec3(0.04), albedo, metalness);
+
+            let D = distributionGGX(N, H, roughness);
+            let G = geometrySmith(NdotV, NdotL, roughness);
+            let F = fresnelSchlick(HdotV, F0);
+
+            let denom = 4.0 * NdotV * NdotL + 0.0001;
+            let specular = D * G * F / denom;
+
+            let kS = F;
+            let kD = (1.0 - kS) * (1.0 - metalness);
+
+            let diffuse = kD * albedo / PI;
+            let lo = (diffuse + specular) * light_color * NdotL;
+            let ambient = vec3(0.03) * albedo;
+
+            let color = ambient + lo;
+
+            return vec4(color, properties.color.a);
+        }
+        case 2: { // TRIANGLES
+            let triangle_id = vertex_output.triangle_id;
+            let color = hash_color(triangle_id + 1);
+
+            return vec4(color, 1.0);
+        }
+        case 3: { // INSTANCES
+            let instance_id = vertex_output.instance_id;
+            let color = hash_color(instance_id + 1);
+
+            return vec4(color, 1.0);
+        }
+        case 4: { // MATERIALS
+            let material_id = u32(vertex_output.position.z * 65535.0);
+            let color = hash_color(material_id + 1);
+
+            return vec4(color, 1.0);
+        }
+        default: {
+            break;
+        }
+    }
+
+    return vec4(1.0, 0.0, 0.0, 1.0);
 }
 
 // Code for vertex output and partial derivatives based on:

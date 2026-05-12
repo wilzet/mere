@@ -140,6 +140,7 @@ impl Pipelines {
                     Some(&world.resources().render_view_bind_group_layout),
                     Some(&world.resources().meshlet_read_attributes_bind_group_layout),
                     Some(Material::material_bind_group_layout(device)),
+                    Some(&world.resources().debug_bind_group_layout),
                 ],
                 immediate_size: 0,
             });

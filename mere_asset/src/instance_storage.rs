@@ -6,6 +6,7 @@ use crate::{
 use mere_math::Transform;
 use mere_mesh::{Aabb, MeshletMesh};
 use slotmap::DenseSlotMap;
+use std::collections::HashSet;
 
 pub type InstanceHandle = slotmap::DefaultKey;
 
@@ -18,6 +19,7 @@ pub struct InstanceStorage {
     pub instance_meshlet_offsets: GpuStorageBuffer<Vec<u32>>,
     pub instance_meshlet_counts: GpuStorageBuffer<Vec<u32>>,
     pub instance_material_ids: GpuStorageBuffer<Vec<u32>>,
+    pub materials_in_scene: HashSet<ResourceHandle<Material>>,
 }
 
 impl InstanceStorage {
@@ -39,6 +41,7 @@ impl InstanceStorage {
                 Some("meshlet_instance_material_ids"),
                 Vec::new(),
             ),
+            materials_in_scene: HashSet::new(),
         }
     }
 
@@ -59,6 +62,7 @@ impl InstanceStorage {
     }
 
     pub fn add_instance(&mut self, instance: Instance) -> InstanceHandle {
+        self.materials_in_scene.insert(instance.material);
         self.instances.insert(instance)
     }
 

@@ -1,4 +1,4 @@
-use crate::camera::CameraController;
+use crate::{Debug, DebugMode, camera::CameraController};
 use egui_plot::{Line, Plot, PlotPoints};
 use mere_asset::World;
 use mere_log::{Profiler, ResolvedSpan};
@@ -85,6 +85,7 @@ impl DebugMemory {
 
 pub fn debugger(
     debug_memory: &mut DebugMemory,
+    debug: &mut Debug,
     profiler: &mut Profiler,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -108,7 +109,7 @@ pub fn debugger(
 
     let (width, height): (u32, u32) = window.inner_size().into();
 
-    draw_overlay_controls(ctx, world, avg_fps, frame_time_ms, lock_view);
+    draw_overlay_controls(ctx, queue, world, avg_fps, frame_time_ms, lock_view, debug);
 
     egui::Window::new(
         egui::RichText::new("MeRe Engine Debugger")
@@ -203,10 +204,12 @@ fn apply_style(ctx: &egui::Context) {
 
 fn draw_overlay_controls(
     ctx: &egui::Context,
+    queue: &wgpu::Queue,
     world: &mut World,
     avg_fps: f32,
     frame_time_ms: f32,
     lock_view: &mut bool,
+    debug: &mut Debug,
 ) {
     egui::Area::new(egui::Id::new("overlay_controls"))
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
@@ -254,6 +257,28 @@ fn draw_overlay_controls(
 
                     if response.changed() {
                         camera.fov_y = fov.to_radians();
+                    }
+
+                    let current_mode = debug.mode;
+
+                    egui::ComboBox::from_label("View Mode")
+                        .selected_text(debug.mode.name())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut debug.mode, DebugMode::CLUSTERS, "Clusters");
+                            ui.selectable_value(&mut debug.mode, DebugMode::SHADED, "Shaded");
+                            ui.selectable_value(&mut debug.mode, DebugMode::MATERIALS, "Materials");
+                            ui.selectable_value(&mut debug.mode, DebugMode::INSTANCES, "Instances");
+                            ui.selectable_value(&mut debug.mode, DebugMode::TRIANGLES, "Triangles");
+                        });
+
+                    if debug.mode != current_mode {
+                        let mode_u32 = debug.mode as u32;
+
+                        queue.write_buffer(
+                            &debug.debug_buffer,
+                            0,
+                            bytemuck::cast_slice(&[mode_u32]),
+                        );
                     }
                 });
         });

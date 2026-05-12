@@ -4,7 +4,7 @@ use crate::{
     texture::Texture,
 };
 use gltf::Texture as GltfTexture;
-use std::sync::{OnceLock, atomic::AtomicU32};
+use std::sync::{Arc, OnceLock, atomic::AtomicU32};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -18,6 +18,12 @@ pub struct MaterialProperties {
 }
 
 #[derive(Clone, Debug)]
+pub struct MaterialData {
+    pub bind_group: Arc<wgpu::BindGroup>,
+    pub id: u32,
+}
+
+#[derive(Clone, Debug)]
 pub struct Material {
     pub name: String,
     pub properties: MaterialProperties,
@@ -26,7 +32,7 @@ pub struct Material {
     pub normal: ResourceHandle<Texture>,
     pub rough_metal: ResourceHandle<Texture>,
     pub alpha_blended: bool,
-    pub bind_group: Option<wgpu::BindGroup>,
+    pub bind_group: Option<Arc<wgpu::BindGroup>>,
     pub id: u32,
 }
 
@@ -193,7 +199,7 @@ impl Material {
             ],
         });
 
-        self.bind_group = Some(bind_group);
+        self.bind_group = Some(Arc::new(bind_group));
     }
 
     /// Returns the shared material bind group layout.
