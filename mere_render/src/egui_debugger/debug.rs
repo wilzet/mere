@@ -513,113 +513,120 @@ fn draw_timing_history(
     }
 
     ui.label(plot_title(label));
-    let total_width = ui.available_width();
 
     card_frame().show(ui, |ui| {
         let max_stack_depth = history.iter().map(|spans| spans.len()).max().unwrap_or(1);
-        let graph_height = (max_stack_depth as f32 * 16.0).clamp(120.0, 500.0);
+        let graph_height = (max_stack_depth as f32 * 20.0).max(120.0);
 
         ui.horizontal_top(|ui| {
-            let graph_width = (total_width - 170.0).max(120.0);
+            let spacing = ui.spacing().item_spacing.x;
+            let total_available = ui.available_width();
+            let legend_width = 160.0;
 
-            let (response, painter) =
-                ui.allocate_painter(egui::vec2(graph_width, graph_height), egui::Sense::hover());
+            ui.vertical(|ui| {
+                let graph_width = (total_available - legend_width - spacing).max(100.0);
 
-            let rect = response.rect;
+                let (response, painter) = ui
+                    .allocate_painter(egui::vec2(graph_width, graph_height), egui::Sense::hover());
 
-            painter.rect_filled(rect, 8.0, PANEL);
+                let rect = response.rect;
+                painter.rect_filled(rect, 8.0, PANEL);
 
-            let frame_count = history.len().max(1);
-            let col_width = rect.width() / frame_count as f32;
+                let frame_count = history.len().max(1);
+                let col_width = rect.width() / frame_count as f32;
+                let column_gap = 1.0 / ui.pixels_per_point();
 
-            // clean spacing between frame columns
-            let column_gap = 1.0 / ui.pixels_per_point();
+                for (frame_idx, spans) in history.iter().enumerate() {
+                    let x0 = rect.left() + frame_idx as f32 * col_width + column_gap * 0.5;
+                    let x1 = rect.left() + (frame_idx + 1) as f32 * col_width - column_gap * 0.5;
 
-            for (frame_idx, spans) in history.iter().enumerate() {
-                let x0 = rect.left() + frame_idx as f32 * col_width + column_gap * 0.5;
-                let x1 = rect.left() + (frame_idx + 1) as f32 * col_width - column_gap * 0.5;
+                    if frame_idx > 0 {
+                        let line_x = x0 - column_gap * 0.5;
+                        painter.line_segment(
+                            [
+                                egui::pos2(line_x, rect.top() + 4.0),
+                                egui::pos2(line_x, rect.bottom() - 4.0),
+                            ],
+                            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(10)),
+                        );
+                    }
 
-                if frame_idx > 0 {
-                    let line_x = x0 - column_gap * 0.5;
+                    let total_ns = spans.iter().map(|(_, _, end)| *end).max().unwrap_or(1) as f32;
 
-                    painter.line_segment(
-                        [
-                            egui::pos2(line_x, rect.top() + 4.0),
-                            egui::pos2(line_x, rect.bottom() - 4.0),
-                        ],
-                        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(10)),
-                    );
-                }
+                    let min_h = 6.0 / ui.pixels_per_point();
+                    let mut total_desired_height = 0.0;
+                    for (_, start, end) in spans.iter() {
+                        let duration_ns = (*end - *start) as f32;
+                        let h = ((duration_ns / total_ns) * rect.height()).max(min_h);
+                        total_desired_height += h;
+                    }
 
-                let total_ns = spans.iter().map(|(_, _, end)| *end).max().unwrap_or(1) as f32;
+                    let overlap_scale = if total_desired_height > rect.height() {
+                        rect.height() / total_desired_height
+                    } else {
+                        1.0
+                    };
 
-                let mut cursor_y = rect.bottom();
+                    let mut cursor_y = rect.bottom();
+                    for (name, start, end) in spans.iter().rev() {
+                        let duration_ns = (*end - *start) as f32;
+                        let h =
+                            ((duration_ns / total_ns) * rect.height()).max(min_h) * overlap_scale;
 
-                for (name, start, end) in spans.iter().rev() {
-                    let duration_ns = (*end - *start) as f32;
+                        let y0 = cursor_y - h;
+                        let y1 = cursor_y;
+                        cursor_y = y0;
 
-                    let h =
-                        ((duration_ns / total_ns) * rect.height()).max(6.0 / ui.pixels_per_point());
+                        let bar_rect = egui::Rect::from_min_max(
+                            egui::pos2(x0, y0 + 1.0),
+                            egui::pos2(x1, y1 - 1.0),
+                        );
 
-                    let y0 = cursor_y - h;
-                    let y1 = cursor_y;
+                        let color = pass_color(name);
 
-                    cursor_y = y0;
+                        // rounded bars
+                        painter.rect_filled(bar_rect, egui::CornerRadius::same(3), color);
 
-                    let bar_rect = egui::Rect::from_min_max(
-                        egui::pos2(x0, y0 + 1.0),
-                        egui::pos2(x1, y1 - 1.0),
-                    );
-
-                    let color = pass_color(name);
-
-                    // rounded bars
-                    painter.rect_filled(bar_rect, egui::CornerRadius::same(3), color);
-
-                    if response.hovered() {
-                        if let Some(pos) = ui.ctx().pointer_hover_pos() {
-                            if bar_rect.expand(0.5).contains(pos) {
-                                response.clone().on_hover_ui(|ui| {
-                                    ui.label(egui::RichText::new(name).strong().color(color));
-
-                                    ui.separator();
-
-                                    info_line(ui, "Frame", format!("{frame_idx}"));
-
-                                    info_line(
-                                        ui,
-                                        "Start",
-                                        format!("{:.2} µs", *start as f32 / 1000.0),
-                                    );
-
-                                    info_line(ui, "End", format!("{:.2} µs", *end as f32 / 1000.0));
-
-                                    info_line(ui, "Duration", format_duration_ns(duration_ns));
-                                });
+                        if response.hovered() {
+                            if let Some(pos) = ui.ctx().pointer_hover_pos() {
+                                if bar_rect.expand(0.5).contains(pos) {
+                                    response.clone().on_hover_ui(|ui| {
+                                        ui.label(egui::RichText::new(name).strong().color(color));
+                                        ui.separator();
+                                        info_line(ui, "Frame", format!("{frame_idx}"));
+                                        info_line(
+                                            ui,
+                                            "Start",
+                                            format!("{:.2} µs", *start as f32 / 1000.0),
+                                        );
+                                        info_line(
+                                            ui,
+                                            "End",
+                                            format!("{:.2} µs", *end as f32 / 1000.0),
+                                        );
+                                        info_line(ui, "Duration", format_duration_ns(duration_ns));
+                                    });
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // outer border
-            painter.rect_stroke(
-                rect,
-                egui::CornerRadius::same(8),
-                egui::Stroke::new(1.0, BORDER),
-                egui::StrokeKind::Outside,
-            );
+                painter.rect_stroke(
+                    rect,
+                    egui::CornerRadius::same(0),
+                    egui::Stroke::new(1.0, BORDER),
+                    egui::StrokeKind::Outside,
+                );
+            });
 
             ui.vertical(|ui| {
-                ui.global_style_mut(|style| {
-                    style.spacing.item_spacing = egui::vec2(style.spacing.item_spacing.x, 0.0)
-                });
-
+                ui.set_width(legend_width);
+                ui.style_mut().spacing.item_spacing.y = 2.0;
                 let latest = history.back().unwrap();
 
                 for (name, start, end) in latest.iter() {
                     let duration_ns = (*end - *start) as f32;
-
                     let color = pass_color(name);
 
                     egui::Frame::new()
@@ -629,18 +636,23 @@ fn draw_timing_history(
                         .inner_margin(egui::Margin::symmetric(6, 2))
                         .outer_margin(0.0)
                         .show(ui, |ui| {
+                            ui.set_min_height(18.0);
                             ui.horizontal(|ui| {
                                 ui.colored_label(color, egui::RichText::new("■").size(8.0));
-
-                                ui.label(egui::RichText::new(name).size(8.0).color(color).strong());
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(name).size(9.0).color(color).strong(),
+                                    )
+                                    .wrap_mode(egui::TextWrapMode::Truncate),
+                                );
                             });
                         })
                         .response
                         .on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new(name).color(color).strong());
+                            ui.separator();
                             info_line(ui, "Start", format!("{:.2} µs", *start as f32 / 1000.0));
-
                             info_line(ui, "End", format!("{:.2} µs", *end as f32 / 1000.0));
-
                             info_line(ui, "Duration", format_duration_ns(duration_ns));
                         });
                 }

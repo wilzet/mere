@@ -238,7 +238,7 @@ impl State {
             &mut encoder,
             self.world.instances(),
             self.world.resources(),
-            &material.bind_group,
+            &material,
             &mut self.profiler,
         );
 

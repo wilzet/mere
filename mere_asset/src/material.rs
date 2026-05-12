@@ -4,7 +4,7 @@ use crate::{
     texture::Texture,
 };
 use gltf::Texture as GltfTexture;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, atomic::AtomicU32};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -27,13 +27,20 @@ pub struct Material {
     pub rough_metal: ResourceHandle<Texture>,
     pub alpha_blended: bool,
     pub bind_group: Option<wgpu::BindGroup>,
+    pub id: u32,
 }
 
 static MATERIAL_BIND_GROUP: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+static MATERIAL_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+fn get_material_id() -> u32 {
+    MATERIAL_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 impl Material {
     /// Handle for the default material.
     pub const DEFAULT_MATERIAL_ID: ResourceHandle<Self> = ResourceHandle::new(0);
+    pub const DEFAULT_MATERIAL_ID_ID: u32 = 1;
     pub(crate) const DEFAULT_MATERIAL_NAME: &str = "mere_default_material";
 
     const DEFAULT_ROUGHNESS: f32 = 0.5;
@@ -70,6 +77,7 @@ impl Material {
             rough_metal: Texture::DEFAULT_WHITE_TEXTURE_ID,
             alpha_blended,
             bind_group: None,
+            id: get_material_id(),
         }
     }
 
@@ -151,6 +159,7 @@ impl Material {
             rough_metal: rough_metal_texture_handle,
             alpha_blended,
             bind_group: None,
+            id: get_material_id(),
         }
     }
 

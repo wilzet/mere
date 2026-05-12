@@ -1,5 +1,5 @@
 use crate::{CLUSTER_SLOTS, pipeline::Pipelines};
-use mere_asset::{InstanceStorage, ResourceStorage, World};
+use mere_asset::{InstanceStorage, Material, ResourceStorage, World};
 use mere_log::Profiler;
 use std::sync::Arc;
 use winit::window::Window;
@@ -178,7 +178,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         instances: &InstanceStorage,
         resources: &ResourceStorage,
-        material_bind_group: &Option<wgpu::BindGroup>,
+        material: &Material,
         profiler: &mut Profiler,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
@@ -191,6 +191,7 @@ impl Renderer {
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
             downsample_depth_pipeline,
+            resolve_material_depth_pipeline,
             material_pipeline,
         ) = self.pipelines.get();
 
@@ -278,7 +279,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("visibility_buffer_raster_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: &per_frame_resources.dummy_render_target,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -312,6 +313,38 @@ impl Renderer {
         }
 
         {
+            let timestamp_writes = profiler.begin("resolve_material_depth_pass");
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("resolve_material_depth_pass"),
+                color_attachments: &[None],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &resources.material_depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(resolve_material_depth_pipeline);
+            render_pass.set_bind_group(
+                0,
+                &per_frame_resources
+                    .bind_groups
+                    .resolve_material_depth_bind_group,
+                &[],
+            );
+            render_pass.draw(0..3, 0..1);
+
+            profiler.end();
+        }
+
+        {
             let timestamp_writes = profiler.begin("material_pass");
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -328,7 +361,7 @@ impl Renderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &resources.material_depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -351,8 +384,10 @@ impl Renderer {
                     .meshlet_read_attributes_bind_group,
                 &[],
             );
-            render_pass.set_bind_group(2, material_bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_bind_group(2, &material.bind_group, &[]);
+
+            let x = material.id * 3;
+            render_pass.draw(x..(x + 3), 0..1);
 
             profiler.end();
         }

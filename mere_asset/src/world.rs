@@ -119,6 +119,13 @@ impl World {
                         }
                     }
                 }
+                AssetEvent::MaterialReady(handle, id) => {
+                    for instance in self.instances.iter_mut() {
+                        if instance.material == handle {
+                            instance.material_id = id;
+                        }
+                    }
+                }
             }
         }
     }
@@ -174,7 +181,17 @@ impl World {
             }
         };
 
-        self.asset_server.reserve_handle(material);
+        let material_id = match self.asset_server.get(material) {
+            Some(material_lock) => {
+                let material = material_lock.read();
+                material.id
+            }
+            None => {
+                self.asset_server.reserve_handle(material);
+                Material::DEFAULT_MATERIAL_ID_ID
+            }
+        };
+
         Some(self.instances.add_instance(Instance::new(
             transform,
             aabb,
@@ -182,6 +199,7 @@ impl World {
             meshlet_offset,
             meshlet_count,
             material,
+            material_id,
         )))
     }
 

@@ -6,6 +6,7 @@ pub struct Pipelines {
     cluster_cull_pipeline: wgpu::ComputePipeline,
     visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
     downsample_depth_pipeline: wgpu::ComputePipeline,
+    resolve_material_depth_pipeline: wgpu::RenderPipeline,
     material_pipeline: wgpu::RenderPipeline,
 }
 
@@ -81,10 +82,12 @@ impl Pipelines {
                 Some("visibility_buffer_raster_pipeline"),
                 device,
                 Some(&layout),
-                config.format,
+                Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::R8Uint,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
+                }),
                 None,
-                Some(wgpu::BlendState::REPLACE),
-                wgpu::ColorWrites::empty(),
                 wgpu::include_wgsl!("visibility_buffer_raster.wgsl"),
             )
         };
@@ -105,6 +108,31 @@ impl Pipelines {
             )
         };
 
+        let resolve_material_depth_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("resolve_material_depth_pipeline"),
+                bind_group_layouts: &[Some(
+                    &world.resources().resolve_material_depth_bind_group_layout,
+                )],
+                immediate_size: 0,
+            });
+
+            create_render_pipeline(
+                Some("resolve_material_depth_pipeline"),
+                device,
+                Some(&layout),
+                None,
+                Some(wgpu::DepthStencilState {
+                    format: Texture::MATERIAL_DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                wgpu::include_wgsl!("resolve_depth.wgsl"),
+            )
+        };
+
         let material_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("material_pipeline_layout"),
@@ -120,10 +148,18 @@ impl Pipelines {
                 Some("material_pipeline"),
                 device,
                 Some(&layout),
-                config.format,
-                Some(Texture::DEPTH_FORMAT),
-                Some(wgpu::BlendState::REPLACE),
-                wgpu::ColorWrites::all(),
+                Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::all(),
+                }),
+                Some(wgpu::DepthStencilState {
+                    format: Texture::MATERIAL_DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Equal),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 wgpu::include_wgsl!("material.wgsl"),
             )
         };
@@ -134,6 +170,7 @@ impl Pipelines {
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
             downsample_depth_pipeline,
+            resolve_material_depth_pipeline,
             material_pipeline,
         }
     }
@@ -147,6 +184,7 @@ impl Pipelines {
         &wgpu::RenderPipeline,
         &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
+        &wgpu::RenderPipeline,
     ) {
         (
             &self.visibility_buffer_clear_pipeline,
@@ -154,6 +192,7 @@ impl Pipelines {
             &self.cluster_cull_pipeline,
             &self.visibility_buffer_raster_pipeline,
             &self.downsample_depth_pipeline,
+            &self.resolve_material_depth_pipeline,
             &self.material_pipeline,
         )
     }
@@ -163,10 +202,8 @@ fn create_render_pipeline(
     label: Option<&str>,
     device: &wgpu::Device,
     layout: Option<&wgpu::PipelineLayout>,
-    color_format: wgpu::TextureFormat,
-    depth_format: Option<wgpu::TextureFormat>,
-    blend: Option<wgpu::BlendState>,
-    write_mask: wgpu::ColorWrites,
+    color_target: Option<wgpu::ColorTargetState>,
+    depth_target: Option<wgpu::DepthStencilState>,
     shader: wgpu::ShaderModuleDescriptor,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(shader);
@@ -183,11 +220,7 @@ fn create_render_pipeline(
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: color_format,
-                blend,
-                write_mask,
-            })],
+            targets: &[color_target],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
         primitive: wgpu::PrimitiveState {
@@ -199,13 +232,7 @@ fn create_render_pipeline(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
-            format,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+        depth_stencil: depth_target,
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,

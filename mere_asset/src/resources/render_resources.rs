@@ -14,6 +14,7 @@ pub struct MeshletBindGroups {
     pub main_render_view_bind_group: wgpu::BindGroup,
     pub render_view_bind_group: wgpu::BindGroup,
     pub downsample_depth_bind_group: wgpu::BindGroup,
+    pub resolve_material_depth_bind_group: wgpu::BindGroup,
 }
 
 #[derive(Clone, Debug)]

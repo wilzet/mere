@@ -32,6 +32,7 @@ impl<R> AssetState<R> {
 pub enum AssetEvent {
     Ready(UntypedHandle),
     MeshletReady(ResourceHandle<MeshletMesh>),
+    MaterialReady(ResourceHandle<Material>, u32),
 }
 
 #[derive(Clone, Debug)]

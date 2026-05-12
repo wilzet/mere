@@ -84,7 +84,7 @@ impl InstanceStorage {
                 .push(instance.meshlet_count);
             self.instance_material_ids
                 .get_mut()
-                .push(*instance.material as u32);
+                .push(instance.material_id);
         }
 
         self.scene_instance_count = self.instances.len() as u32;
@@ -129,6 +129,7 @@ pub struct Instance {
     pub meshlet_offset: u32,
     pub meshlet_count: u32,
     pub material: ResourceHandle<Material>,
+    pub material_id: u32,
 }
 
 impl Instance {
@@ -139,6 +140,7 @@ impl Instance {
         meshlet_offset: u32,
         meshlet_count: u32,
         material_handle: ResourceHandle<Material>,
+        material_id: u32,
     ) -> Self {
         Self {
             transform,
@@ -148,6 +150,7 @@ impl Instance {
             meshlet_offset,
             meshlet_count,
             material: material_handle,
+            material_id,
         }
     }
 }

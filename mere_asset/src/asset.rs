@@ -121,6 +121,11 @@ impl Asset for Material {
 
     fn finish(&mut self, asset_server: &AssetServer) {
         self.try_finish(asset_server.device(), asset_server);
+
+        let _ = asset_server.send(AssetEvent::MaterialReady(
+            ResourceHandle::from(self.name.as_str()),
+            self.id,
+        ));
     }
 
     fn size_in_bytes(&self) -> usize {

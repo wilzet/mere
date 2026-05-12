@@ -27,6 +27,7 @@ pub struct ResourceStorage {
     pub visibility_buffer_raster_bind_group_layout: wgpu::BindGroupLayout,
     pub meshlet_read_attributes_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
+    pub resolve_material_depth_bind_group_layout: wgpu::BindGroupLayout,
 
     pub downsample_depth_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -81,7 +82,12 @@ impl ResourceStorage {
                     view_formats: &[],
                 })
             },
-            material_depth: Texture::create_depth_texture(device, config, "material_depth_texture"),
+            material_depth: Texture::create_depth_texture(
+                device,
+                config,
+                "material_depth_texture",
+                true,
+            ),
             depth_pyramid: DepthPyramid::new(device, "depth_pyramid", config.width, config.height),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
@@ -238,6 +244,21 @@ impl ResourceStorage {
                         entry(wgpu::BindingType::Sampler(
                             wgpu::SamplerBindingType::NonFiltering,
                         )),
+                    ],
+                )
+                .get(),
+            ),
+            resolve_material_depth_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("resolve_material_depth_bind_group_layout"),
+                    wgpu::ShaderStages::FRAGMENT,
+                    &mut [
+                        storage_buffer(true),
+                        storage_buffer(true),
+                        storage_texture(
+                            wgpu::TextureFormat::R64Uint,
+                            wgpu::StorageTextureAccess::ReadOnly,
+                        ),
                     ],
                 )
                 .get(),
@@ -554,6 +575,26 @@ impl ResourceStorage {
                         .bind_group_entry_sampler(13),
                 ],
             }),
+            resolve_material_depth_bind_group: device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("resolve_material_depth_bind_group"),
+                    layout: &self.resolve_material_depth_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.visible_cluster_info.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: instances.instance_material_ids.binding().unwrap(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                        },
+                    ],
+                },
+            ),
         };
 
         self.meshlet_per_frame_resources = Some(PerFrameResources {
@@ -601,7 +642,8 @@ impl ResourceStorage {
             })
         };
 
-        self.material_depth = Texture::create_depth_texture(device, config, "material_depth_texture");
+        self.material_depth =
+            Texture::create_depth_texture(device, config, "material_depth_texture", true);
 
         self.depth_pyramid = DepthPyramid::new(
             device,
