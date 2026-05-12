@@ -1,6 +1,6 @@
 use crate::{
-    camera::Camera, instance_storage::InstanceStorage, meshlet_storage::MeshletStorage,
-    texture::Texture,
+    asset::Asset, camera::Camera, instance_storage::InstanceStorage,
+    meshlet_storage::MeshletStorage, texture::Texture,
 };
 use mere_mesh::Meshlet;
 use render_resources::*;
@@ -667,6 +667,29 @@ impl ResourceStorage {
             config.width,
             config.height,
         )
+    }
+
+    pub fn report_memory_host(&self) -> usize {
+        size_of::<Self>()
+    }
+
+    pub fn report_memory_device(&self) -> usize {
+        let mut total = 0;
+
+        total += self.cluster_info.size() as usize;
+        total += self.visible_cluster_info.size() as usize;
+        total += self.main_render_view.size() as usize;
+        total += self.render_view.size() as usize;
+        total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height * 8)
+            as usize;
+        total += self.material_depth.size_in_bytes();
+        total += self.depth_pyramid.depth_pyramid.size_in_bytes();
+        total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
+            (per_frame.indirect_draw_args.size() + per_frame.indirect_cluster_args.size()) as usize
+        } else {
+            8
+        };
+        total
     }
 }
 

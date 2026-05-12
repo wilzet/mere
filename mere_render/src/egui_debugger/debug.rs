@@ -378,6 +378,9 @@ fn draw_memory_section(ui: &mut egui::Ui, world: &World) {
     section(ui, "Memory", |ui| {
         let (mesh_b, tex_b, mat_b) = world.assets().report_memory();
 
+        let resource_h_b = world.resources().report_memory_host();
+        let resource_d_b = world.resources().report_memory_device();
+
         let inst_h_b = world.instances().report_memory_host();
         let inst_d_b = world.instances().report_memory_device();
 
@@ -393,13 +396,14 @@ fn draw_memory_section(ui: &mut egui::Ui, world: &World) {
                 memory_row(ui, "Instances", format!("{:.2} MB", to_mb(inst_h_b)));
                 memory_row(ui, "Meshes", format!("{:.2} MB", to_mb(mesh_b)));
                 memory_row(ui, "Materials", format!("{:.1} KB", to_kb(mat_b)));
+                memory_row(ui, "Resources", format!("{:.1} KB", to_kb(resource_h_b)));
 
                 ui.separator();
 
                 memory_row(
                     ui,
                     "Total",
-                    format!("{:.2} MB", to_mb(inst_h_b + mesh_b + mat_b)),
+                    format!("{:.2} MB", to_mb(inst_h_b + mesh_b + mat_b + resource_h_b)),
                 );
             });
 
@@ -409,13 +413,14 @@ fn draw_memory_section(ui: &mut egui::Ui, world: &World) {
                 memory_row(ui, "Instances", format!("{:.1} KB", to_kb(inst_d_b)));
                 memory_row(ui, "Meshlets", format!("{:.2} MB", to_mb(mlet_b)));
                 memory_row(ui, "Textures", format!("{:.2} MB", to_mb(tex_b)));
+                memory_row(ui, "Resources", format!("{:.2} MB", to_mb(resource_d_b)));
 
                 ui.separator();
 
                 memory_row(
                     ui,
                     "Total",
-                    format!("{:.2} MB", to_mb(inst_d_b + mlet_b + tex_b)),
+                    format!("{:.2} MB", to_mb(inst_d_b + mlet_b + tex_b + resource_d_b)),
                 );
             });
         });
