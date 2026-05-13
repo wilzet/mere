@@ -583,8 +583,10 @@ fn draw_depth_pyramid_section(
             }
         });
 
+        let aspect_ratio = height as f32 / width as f32;
         let card_width = ui.available_width();
-        let size = egui::vec2(card_width, card_width);
+        let card_height = card_width * aspect_ratio;
+        let size = egui::vec2(card_width, card_height);
         let sized_texture = egui::load::SizedTexture::new(texture_id, size);
         ui.add(egui::Image::new(sized_texture));
 
