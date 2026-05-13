@@ -9,7 +9,7 @@ struct RenderView {
 
 // --- Vertex shader ---
 
-@group(0) @binding(0) var<storage, read> main_camera: RenderView;
+@group(0) @binding(0) var<uniform> main_camera: RenderView;
 
 struct Vertex {
     position: array<f32, 3>,

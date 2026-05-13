@@ -48,7 +48,7 @@ struct DrawIndirectArgs {
 @group(0) @binding(4) var<storage, read_write> visible_cluster_info: array<ClusterInfo>;
 @group(0) @binding(5) var<storage, read_write> indirect_args: DrawIndirectArgs;
 
-@group(1) @binding(0) var<storage, read> render_view: RenderView;
+@group(1) @binding(0) var<uniform> render_view: RenderView;
 
 fn should_cull(instance_id: u32, meshlet: Meshlet) -> bool {
     let bounds = meshlet.bounds;

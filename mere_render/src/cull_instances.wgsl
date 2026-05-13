@@ -43,7 +43,7 @@ struct DispatchIndirectArgs {
 @group(0) @binding(5) var<storage, read_write> visible_instance_cluster_count: atomic<u32>;
 @group(0) @binding(6) var<storage, read_write> indirect_args: DispatchIndirectArgs;
 
-@group(1) @binding(0) var<storage, read> render_view: RenderView;
+@group(1) @binding(0) var<uniform> render_view: RenderView;
 
 var<workgroup> shared_cluster_base: u32;
 

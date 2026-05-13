@@ -58,13 +58,13 @@ impl ResourceStorage {
             main_render_view: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("main_render_view"),
                 size: size_of::<RenderView>() as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             culling_render_view: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("cullin_render_view"),
                 size: size_of::<RenderView>() as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             render_view: RenderView::new(main_camera),
@@ -185,7 +185,11 @@ impl ResourceStorage {
                 &Layout::sequential(
                     Some("render_view_bind_group_layout"),
                     wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
-                    &mut [storage_buffer(true)],
+                    &mut [entry(wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    })],
                 )
                 .get(),
             ),

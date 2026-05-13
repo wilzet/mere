@@ -61,7 +61,7 @@ struct ClusterInfo {
     meshlet_id: u32,
 }
 
-@group(0) @binding(0) var<storage, read> main_camera: RenderView;
+@group(0) @binding(0) var<uniform> main_camera: RenderView;
 
 @group(1) @binding(0) var<storage, read> vertices: array<Vertex>;
 @group(1) @binding(1) var<storage, read> vertex_attributes: array<VertexAttributes>;
