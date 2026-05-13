@@ -57,6 +57,7 @@ impl Renderer {
                     max_compute_workgroup_size_z: 64,
                     max_compute_invocations_per_workgroup: 1024,
                     max_storage_textures_per_shader_stage: 16,
+                    max_storage_buffers_per_shader_stage: 16,
                     max_immediate_size: 8,
                     ..Default::default()
                 },
@@ -181,6 +182,7 @@ impl Renderer {
         resources: &ResourceStorage,
         materials: &[MaterialData],
         profiler: &mut Profiler,
+        lock_view: bool,
         debug: &Debug,
     ) {
         let Some(per_frame_resources) = resources.meshlet_per_frame_resources.as_ref() else {
@@ -235,12 +237,14 @@ impl Renderer {
             instance_cull_pass.set_pipeline(instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
-                &per_frame_resources.bind_groups.instance_cull_bind_group,
+                &per_frame_resources.bind_groups.instance_cull_first_bind_group,
                 &[],
             );
             instance_cull_pass.set_bind_group(
                 1,
-                &per_frame_resources.bind_groups.culling_render_view_bind_group,
+                &per_frame_resources
+                    .bind_groups
+                    .culling_render_view_bind_group,
                 &[],
             );
 
@@ -259,17 +263,19 @@ impl Renderer {
             cluster_cull_pass.set_pipeline(cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
-                &per_frame_resources.bind_groups.cluster_cull_bind_group,
+                &per_frame_resources.bind_groups.cluster_cull_first_bind_group,
                 &[],
             );
             cluster_cull_pass.set_bind_group(
                 1,
-                &per_frame_resources.bind_groups.culling_render_view_bind_group,
+                &per_frame_resources
+                    .bind_groups
+                    .culling_render_view_bind_group,
                 &[],
             );
 
             cluster_cull_pass
-                .dispatch_workgroups_indirect(&per_frame_resources.indirect_cluster_args, 0);
+                .dispatch_workgroups_indirect(&per_frame_resources.cluster_first_indirect_args, 0);
 
             profiler.end();
         }
@@ -396,8 +402,10 @@ impl Renderer {
             profiler.end();
         }
 
-        resources
-            .depth_pyramid
-            .downsample(encoder, per_frame_resources, profiler);
+        if !lock_view {
+            resources
+                .depth_pyramid
+                .downsample(encoder, per_frame_resources, profiler);
+        }
     }
 }

@@ -285,6 +285,7 @@ impl State {
             self.world.resources(),
             &materials,
             &mut self.profiler,
+            self.lock_view,
             &self.debug,
         );
 

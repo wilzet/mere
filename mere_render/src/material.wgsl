@@ -51,7 +51,7 @@ struct Meshlet {
 
 struct MeshUniform {
     model_matrix: mat3x4<f32>,
-    previous_model: mat3x4<f32>,
+    previous_model_matrix: mat3x4<f32>,
     inverse_transpose_a: array<vec4<f32>, 2>,
     inverse_transpose_b: vec4<f32>,
 }

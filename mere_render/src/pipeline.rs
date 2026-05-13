@@ -2,8 +2,10 @@ use mere_asset::{Material, Texture, World};
 
 pub struct Pipelines {
     visibility_buffer_clear_pipeline: wgpu::ComputePipeline,
-    instance_cull_pipeline: wgpu::ComputePipeline,
-    cluster_cull_pipeline: wgpu::ComputePipeline,
+    instance_cull_first_pipeline: wgpu::ComputePipeline,
+    instance_cull_second_pipeline: wgpu::ComputePipeline,
+    cluster_cull_first_pipeline: wgpu::ComputePipeline,
+    cluster_cull_second_pipeline: wgpu::ComputePipeline,
     visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
     resolve_material_depth_pipeline: wgpu::RenderPipeline,
     material_pipeline: wgpu::RenderPipeline,
@@ -29,47 +31,85 @@ impl Pipelines {
             )
         };
 
-        let instance_cull_pipeline = {
+        let instance_cull_first_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("instance_cull_pipeline_layout"),
+                label: Some("instance_cull_first_pipeline_layout"),
                 bind_group_layouts: &[
-                    Some(&world.resources().instance_cull_bind_group_layout),
+                    Some(&world.resources().instance_cull_first_bind_group_layout),
                     Some(&world.resources().render_view_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
 
             create_compute_pipeline(
-                Some("instance_cull_pipeline"),
+                Some("instance_cull_first_pipeline"),
                 device,
                 Some(&layout),
-                wgpu::include_wgsl!("cull_instances.wgsl"),
+                wgpu::include_wgsl!("cull_instances_first.wgsl"),
                 "cull_instances",
             )
         };
 
-        let cluster_cull_pipeline = {
+        let instance_cull_second_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("cluster_cull_pipeline_layout"),
+                label: Some("instance_cull_second_pipeline_layout"),
                 bind_group_layouts: &[
-                    Some(&world.resources().cluster_cull_bind_group_layout),
+                    Some(&world.resources().instance_cull_second_bind_group_layout),
                     Some(&world.resources().render_view_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
 
             create_compute_pipeline(
-                Some("cluster_cull_pipeline"),
+                Some("instance_cull_second_pipeline"),
                 device,
                 Some(&layout),
-                wgpu::include_wgsl!("cull_clusters.wgsl"),
+                wgpu::include_wgsl!("cull_instances_second.wgsl"),
+                "cull_instances",
+            )
+        };
+
+        let cluster_cull_first_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("cluster_cull_first_pipeline_layout"),
+                bind_group_layouts: &[
+                    Some(&world.resources().cluster_cull_first_bind_group_layout),
+                    Some(&world.resources().render_view_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("cluster_cull_first_pipeline"),
+                device,
+                Some(&layout),
+                wgpu::include_wgsl!("cull_clusters_first.wgsl"),
+                "cull_clusters",
+            )
+        };
+
+        let cluster_cull_second_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("cluster_cull_second_pipeline_layout"),
+                bind_group_layouts: &[
+                    Some(&world.resources().cluster_cull_second_bind_group_layout),
+                    Some(&world.resources().render_view_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("cluster_cull_second_pipeline"),
+                device,
+                Some(&layout),
+                wgpu::include_wgsl!("cull_clusters_second.wgsl"),
                 "cull_clusters",
             )
         };
 
         let visibility_buffer_raster_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("vsibility_buffer_raster_pipeline_layout"),
+                label: Some("visibility_buffer_raster_pipeline_layout"),
                 bind_group_layouts: &[
                     Some(&world.resources().render_view_bind_group_layout),
                     Some(&world.resources().visibility_buffer_raster_bind_group_layout),
@@ -150,8 +190,10 @@ impl Pipelines {
 
         Self {
             visibility_buffer_clear_pipeline,
-            instance_cull_pipeline,
-            cluster_cull_pipeline,
+            instance_cull_first_pipeline,
+            instance_cull_second_pipeline,
+            cluster_cull_first_pipeline,
+            cluster_cull_second_pipeline,
             visibility_buffer_raster_pipeline,
             resolve_material_depth_pipeline,
             material_pipeline,
@@ -170,8 +212,8 @@ impl Pipelines {
     ) {
         (
             &self.visibility_buffer_clear_pipeline,
-            &self.instance_cull_pipeline,
-            &self.cluster_cull_pipeline,
+            &self.instance_cull_first_pipeline,
+            &self.cluster_cull_first_pipeline,
             &self.visibility_buffer_raster_pipeline,
             &self.resolve_material_depth_pipeline,
             &self.material_pipeline,

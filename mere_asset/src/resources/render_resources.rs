@@ -4,8 +4,10 @@ use mere_math::{Mat4, Vec3, Vec4, Vec4Swizzles};
 #[derive(Clone, Debug)]
 pub struct MeshletBindGroups {
     pub visibility_buffer_clear_bind_group: wgpu::BindGroup,
-    pub instance_cull_bind_group: wgpu::BindGroup,
-    pub cluster_cull_bind_group: wgpu::BindGroup,
+    pub instance_cull_first_bind_group: wgpu::BindGroup,
+    pub instance_cull_second_bind_group: wgpu::BindGroup,
+    pub cluster_cull_first_bind_group: wgpu::BindGroup,
+    pub cluster_cull_second_bind_group: wgpu::BindGroup,
     pub visibility_buffer_raster_bind_group: wgpu::BindGroup,
     pub meshlet_read_attributes_bind_group: wgpu::BindGroup,
     pub main_render_view_bind_group: wgpu::BindGroup,
@@ -18,7 +20,9 @@ pub struct MeshletBindGroups {
 pub struct PerFrameResources {
     pub visibility_buffer: wgpu::TextureView,
     pub dummy_render_target: wgpu::TextureView,
-    pub indirect_cluster_args: wgpu::Buffer,
+    pub instance_second_indirect_args: wgpu::Buffer,
+    pub cluster_first_indirect_args: wgpu::Buffer,
+    pub cluster_second_indirect_args: wgpu::Buffer,
     pub indirect_draw_args: wgpu::Buffer,
     pub bind_groups: MeshletBindGroups,
 }
