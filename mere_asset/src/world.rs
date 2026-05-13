@@ -11,7 +11,7 @@ use crate::{
 };
 use mere_common::ASSET_DIR;
 use mere_log::Profiler;
-use mere_math::{Quat, Transform};
+use mere_math::{Quat, Transform, Vec3};
 use mere_mesh::{Aabb, MeshletMesh};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::path;
@@ -32,12 +32,22 @@ impl World {
         config: &wgpu::SurfaceConfiguration,
         cluster_slots: u32,
     ) -> Self {
+        let mut main_camera = Camera::new(
+            45.0f32.to_radians(),
+            config.width,
+            config.height,
+            0.1,
+            100.0,
+            Vec3::new(0.0, 10.0, -10.0),
+        );
+        main_camera.look_at(Vec3::ZERO);
+
         Self {
-            cameras: Vec::new(),
+            cameras: vec![main_camera],
             asset_server: AssetServer::new(device, queue),
             instances: InstanceStorage::new(),
             meshlets: MeshletStorage::new(device),
-            resources: ResourceStorage::new(cluster_slots, device, config),
+            resources: ResourceStorage::new(cluster_slots, device, config, &main_camera),
         }
     }
 

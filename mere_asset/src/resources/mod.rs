@@ -2,20 +2,21 @@ use crate::{
     asset::Asset, camera::Camera, instance_storage::InstanceStorage,
     meshlet_storage::MeshletStorage, texture::Texture,
 };
+use depth_pyramid::DepthPyramid;
 use mere_mesh::Meshlet;
 use render_resources::*;
-use depth_pyramid::DepthPyramid;
 use wgpu::util::DeviceExt;
 
-mod render_resources;
 mod depth_pyramid;
+mod render_resources;
 
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
     pub cluster_info: wgpu::Buffer,
     pub visible_cluster_info: wgpu::Buffer,
     pub main_render_view: wgpu::Buffer,
-    pub render_view: wgpu::Buffer,
+    pub culling_render_view: wgpu::Buffer,
+    render_view: RenderView,
 
     pub visibility_buffer: wgpu::Texture,
     pub material_depth: Texture,
@@ -39,6 +40,7 @@ impl ResourceStorage {
         cluster_slots: u32,
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
+        main_camera: &Camera,
     ) -> Self {
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
@@ -59,12 +61,13 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            render_view: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("render_view"),
+            culling_render_view: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("cullin_render_view"),
                 size: size_of::<RenderView>() as u64,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+            render_view: RenderView::new(main_camera),
             visibility_buffer: {
                 let size = wgpu::Extent3d {
                     width: config.width,
@@ -435,12 +438,12 @@ impl ResourceStorage {
                     resource: self.main_render_view.as_entire_binding(),
                 }],
             }),
-            render_view_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("render_view_bind_group"),
+            culling_render_view_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("culling_render_view_bind_group"),
                 layout: &self.render_view_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.render_view.as_entire_binding(),
+                    resource: self.culling_render_view.as_entire_binding(),
                 }],
             }),
             downsample_depth_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -559,19 +562,15 @@ impl ResourceStorage {
         });
     }
 
-    pub fn update_render_view(&self, queue: &wgpu::Queue, camera: &Camera, update_view: bool) {
-        queue.write_buffer(
-            &self.main_render_view,
-            0,
-            bytemuck::cast_slice(&[RenderView::from_camera(camera)]),
-        );
+    pub fn update_render_view(&mut self, queue: &wgpu::Queue, camera: &Camera, update_view: bool) {
+        self.render_view.update(camera);
+        let binding = [self.render_view];
+        let data = bytemuck::cast_slice(&binding);
+
+        queue.write_buffer(&self.main_render_view, 0, data);
 
         if update_view {
-            queue.write_buffer(
-                &self.render_view,
-                0,
-                bytemuck::cast_slice(&[RenderView::from_camera(camera)]),
-            );
+            queue.write_buffer(&self.culling_render_view, 0, data);
         }
     }
 
@@ -616,7 +615,7 @@ impl ResourceStorage {
         total += self.cluster_info.size() as usize;
         total += self.visible_cluster_info.size() as usize;
         total += self.main_render_view.size() as usize;
-        total += self.render_view.size() as usize;
+        total += self.culling_render_view.size() as usize;
         total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height * 8)
             as usize;
         total += self.material_depth.size_in_bytes();

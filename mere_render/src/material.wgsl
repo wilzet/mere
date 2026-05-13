@@ -2,6 +2,7 @@ struct RenderView {
     world_position: vec4<f32>,
     viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
+    previous_view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
 }
@@ -335,7 +336,7 @@ struct Debug {
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let vertex_output = get_vertex_output(frag_coord);
 
-    switch (debug.mode) {
+    switch debug.mode {
         case 0: { // CLUSTERS
             let cluster_id = vertex_output.cluster_id;
             let color = hash_color(cluster_id + 1);

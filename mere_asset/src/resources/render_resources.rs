@@ -1,7 +1,5 @@
-use crate::{
-    camera::Camera,
-};
-use mere_math::Vec4Swizzles;
+use crate::camera::Camera;
+use mere_math::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 #[derive(Clone, Debug)]
 pub struct MeshletBindGroups {
@@ -11,7 +9,7 @@ pub struct MeshletBindGroups {
     pub visibility_buffer_raster_bind_group: wgpu::BindGroup,
     pub meshlet_read_attributes_bind_group: wgpu::BindGroup,
     pub main_render_view_bind_group: wgpu::BindGroup,
-    pub render_view_bind_group: wgpu::BindGroup,
+    pub culling_render_view_bind_group: wgpu::BindGroup,
     pub downsample_depth_bind_group: wgpu::BindGroup,
     pub resolve_material_depth_bind_group: wgpu::BindGroup,
 }
@@ -31,15 +29,45 @@ pub struct RenderView {
     world_position: [f32; 4],
     viewport: [f32; 4],
     view_proj: [[f32; 4]; 4],
+    previous_view_proj: [[f32; 4]; 4],
     frustum_planes: [[f32; 4]; 6],
 }
 
 impl RenderView {
-    pub fn from_camera(camera: &Camera) -> Self {
+    pub fn new(camera: &Camera) -> Self {
         let view_proj = camera.projection_matrix() * camera.view_matrix();
         let frustum_matrix = camera.frustum_matrix();
 
-        let row = |i: usize| frustum_matrix.row(i);
+        Self::new_impl(
+            camera.transform.translation,
+            camera.viewport,
+            view_proj,
+            view_proj,
+            frustum_matrix,
+        )
+    }
+
+    pub fn update(&mut self, camera: &Camera) {
+        let view_proj = camera.projection_matrix() * camera.view_matrix();
+        let frustum_matrix = camera.frustum_matrix();
+
+        *self = Self::new_impl(
+            camera.transform.translation,
+            camera.viewport,
+            view_proj,
+            Mat4::from_cols_array_2d(&self.view_proj),
+            frustum_matrix,
+        );
+    }
+
+    fn new_impl(
+        world_position: Vec3,
+        viewport: Vec4,
+        view_proj: Mat4,
+        previous_view_proj: Mat4,
+        frustum: Mat4,
+    ) -> Self {
+        let row = |i: usize| frustum.row(i);
 
         let mut planes = [
             (row(3) + row(0)), // Left
@@ -56,9 +84,10 @@ impl RenderView {
         }
 
         Self {
-            world_position: camera.transform.translation.to_homogeneous().into(),
-            viewport: camera.viewport.into(),
+            world_position: world_position.to_homogeneous().into(),
+            viewport: viewport.into(),
             view_proj: view_proj.to_cols_array_2d(),
+            previous_view_proj: previous_view_proj.to_cols_array_2d(),
             frustum_planes: planes.map(|p| p.to_array()),
         }
     }

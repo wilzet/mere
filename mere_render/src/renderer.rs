@@ -240,7 +240,7 @@ impl Renderer {
             );
             instance_cull_pass.set_bind_group(
                 1,
-                &per_frame_resources.bind_groups.render_view_bind_group,
+                &per_frame_resources.bind_groups.culling_render_view_bind_group,
                 &[],
             );
 
@@ -264,7 +264,7 @@ impl Renderer {
             );
             cluster_cull_pass.set_bind_group(
                 1,
-                &per_frame_resources.bind_groups.render_view_bind_group,
+                &per_frame_resources.bind_groups.culling_render_view_bind_group,
                 &[],
             );
 

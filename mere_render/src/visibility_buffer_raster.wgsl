@@ -2,6 +2,7 @@ struct RenderView {
     world_position: vec4<f32>,
     viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
+    previous_view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
 }
@@ -97,10 +98,10 @@ fn get_meshlet_vertex_id(meshlet: Meshlet, index_id: u32) -> u32 {
     let byte_index = meshlet.index_offset + index_id;
     let word_offset = byte_index / 4u;
     let bit_offset = (byte_index % 4u) * 8u;
-    
+
     let packed = meshlet_indices[word_offset];
     let local_index = (packed >> bit_offset) & 0xFFu;
-    
+
     return meshlet_vertex_indices[meshlet.vertex_offset + local_index];
 }
 
@@ -121,6 +122,6 @@ fn divide(a: f32, b: f32) -> f32 {
 fn fs_main(in: VertexOutput) {
     let depth = bitcast<u32>(in.position.z);
     let visibility = (u64(depth) << 32) | u64(in.packed_id);
-    
+
     textureAtomicMax(visibility_buffer, vec2<u32>(in.position.xy), visibility);
 }

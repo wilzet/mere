@@ -1,5 +1,5 @@
 use crate::{camera::CameraController, egui_debugger::EguiRenderer, renderer::Renderer};
-use mere_asset::{Camera, World};
+use mere_asset::World;
 use mere_log::Profiler;
 use mere_math::{Transform, Vec3};
 use std::{sync::Arc, time::Duration};
@@ -112,17 +112,6 @@ impl State {
                 }
             }
         }
-
-        let mut camera = Camera::new(
-            45.0f32.to_radians(),
-            config.width,
-            config.height,
-            0.1,
-            100.0,
-            Vec3::new(1.0, 5.0, -5.0),
-        );
-        camera.look_at(Vec3::ZERO);
-        world.add_camera(camera);
 
         let camera_controller = CameraController::new(5.0, 0.002);
 

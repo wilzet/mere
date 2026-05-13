@@ -2,6 +2,7 @@ struct RenderView {
     world_position: vec4<f32>,
     viewport: vec4<f32>,
     view_proj: mat4x4<f32>,
+    previous_view_proj: mat4x4<f32>,
     // 6 planes: Left, Right, Top, Bottom, Near, Far
     planes: array<vec4<f32>, 6>,
 }
