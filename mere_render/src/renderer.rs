@@ -48,7 +48,8 @@ impl Renderer {
                     | wgpu::Features::TEXTURE_INT64_ATOMIC
                     | wgpu::Features::SHADER_INT64
                     | wgpu::Features::IMMEDIATES
-                    | wgpu::Features::TIMESTAMP_QUERY,
+                    | wgpu::Features::TIMESTAMP_QUERY
+                    | wgpu::Features::FLOAT32_FILTERABLE,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits {
                     max_compute_workgroup_size_x: 1024,
@@ -191,7 +192,6 @@ impl Renderer {
             instance_cull_pipeline,
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
-            downsample_depth_pipeline,
             resolve_material_depth_pipeline,
             material_pipeline,
         ) = self.pipelines.get();
@@ -396,31 +396,8 @@ impl Renderer {
             profiler.end();
         }
 
-        {
-            let timestamp_writes = profiler.begin("depth_pyramid_downsample");
-
-            let mut downsample_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("depth_pyramid_downsample"),
-                timestamp_writes,
-            });
-            downsample_pass.set_pipeline(downsample_depth_pipeline);
-            downsample_pass.set_bind_group(
-                0,
-                &per_frame_resources.bind_groups.downsample_depth_bind_group,
-                &[],
-            );
-            downsample_pass.set_immediates(0, &resources.depth_pyramid.mip_count.to_le_bytes());
-
-            let size = view.texture().size();
-            let virtual_view_size_x = (size.width + 1).next_power_of_two();
-            let virtual_view_size_y = (size.height + 1).next_power_of_two();
-            downsample_pass.dispatch_workgroups(
-                virtual_view_size_x.div_ceil(64),
-                virtual_view_size_y.div_ceil(64),
-                1,
-            );
-
-            profiler.end();
-        }
+        resources
+            .depth_pyramid
+            .downsample(encoder, per_frame_resources, profiler);
     }
 }

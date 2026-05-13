@@ -84,6 +84,7 @@ impl DebugMemory {
 }
 
 pub fn debugger(
+    renderer: &mut egui_wgpu::Renderer,
     debug_memory: &mut DebugMemory,
     debug: &mut Debug,
     profiler: &mut Profiler,
@@ -157,6 +158,8 @@ pub fn debugger(
                 draw_memory_section(ui, world);
 
                 draw_scene_section(ui, debug_memory, world);
+
+                draw_depth_pyramid_section(ui, world, device, renderer);
 
                 ui.add_space(10.0);
             });
@@ -529,6 +532,69 @@ fn draw_scene_section(ui: &mut egui::Ui, debug_memory: &mut DebugMemory, world: 
                         });
                     }
                 });
+        });
+    });
+}
+
+fn draw_depth_pyramid_section(
+    ui: &mut egui::Ui,
+    world: &World,
+    device: &wgpu::Device,
+    renderer: &mut egui_wgpu::Renderer,
+) {
+    let dp = &world.resources().depth_pyramid;
+    let (width, height) = dp.virtual_size();
+
+    let root_id = ui.id().with("depth_pyramid");
+    let last_size = ui.data_mut(|d| d.get_temp::<(u32, u32)>(root_id.with("last_size")));
+
+    if last_size != Some((width, height)) {
+        ui.data_mut(|d| {
+            for m in 0..dp.mip_count {
+                let key = root_id.with("tex_id").with(m);
+                if let Some(old_id) = d.get_temp::<egui::TextureId>(key) {
+                    renderer.free_texture(&old_id);
+                    d.remove::<egui::TextureId>(key);
+                }
+            }
+            d.insert_temp(root_id.with("last_size"), (width, height));
+        });
+    }
+
+    section(ui, "Depth Pyramid", |ui| {
+        let mut selected_mip =
+            ui.data_mut(|d| *d.get_temp_mut_or::<u32>(root_id.with("mip_idx"), 1));
+        ui.add(egui::Slider::new(&mut selected_mip, 1..=dp.mip_count));
+        ui.data_mut(|d| d.insert_temp(root_id.with("mip_idx"), selected_mip));
+
+        let id_key = root_id.with("tex_id").with(selected_mip);
+
+        let texture_id = ui.data_mut(|d| {
+            if let Some(id) = d.get_temp::<egui::TextureId>(id_key) {
+                id
+            } else {
+                let new_id = renderer.register_native_texture(
+                    device,
+                    &dp.depth_pyramid_mips[selected_mip as usize - 1],
+                    wgpu::FilterMode::Nearest,
+                );
+                d.insert_temp(id_key, new_id);
+                new_id
+            }
+        });
+
+        let card_width = ui.available_width();
+        let size = egui::vec2(card_width, card_width);
+        let sized_texture = egui::load::SizedTexture::new(texture_id, size);
+        ui.add(egui::Image::new(sized_texture));
+
+        ui.vertical_centered(|ui| {
+            ui.label(format!(
+                "Mip {} | Resolution: {}x{}",
+                selected_mip,
+                (width >> selected_mip).max(1),
+                (height >> selected_mip).max(1)
+            ));
         });
     });
 }

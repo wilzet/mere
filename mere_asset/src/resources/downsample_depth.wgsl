@@ -30,6 +30,21 @@ fn downsample_depth_first(
     let y = block_xy.y + 8 * ((local_id >> 7));
 
     downsample_mips_0_and_1(vec2(x, y), workgroup_id.xy, local_id);
+
+    downsample_mips_2_to_5(vec2(x, y), workgroup_id.xy, local_id);
+}
+
+@compute @workgroup_size(256, 1, 1)
+fn downsample_depth_second(
+    @builtin(local_invocation_index) local_id: u32,
+) {
+    let block_xy = remap_to_block(local_id % 64);
+    let x = block_xy.x + 8 * ((local_id >> 6) % 2);
+    let y = block_xy.y + 8 * ((local_id >> 7));
+
+    downsample_mips_6_and_7(vec2(x, y));
+
+    downsample_mips_8_to_11(vec2(x, y), local_id);
 }
 
 fn downsample_mips_0_and_1(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: u32) {
@@ -83,7 +98,7 @@ fn downsample_mips_0_and_1(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: 
     }
 }
 
-fn downsample_mips_2_to_5(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
+fn downsample_mips_2_to_5(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: u32) {
     if constants.max_mip_level <= 2u { return; }
     workgroupBarrier();
     downsample_mip_2(coord, workgroup_id, local_id);
@@ -101,7 +116,7 @@ fn downsample_mips_2_to_5(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) 
     downsample_mip_5(workgroup_id, local_id);
 }
 
-fn downsample_mip_2(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
+fn downsample_mip_2(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: u32) {
     if local_id < 64u {
         let idx = coord.y * 16 + coord.x;
         let v = reduce_4(vec4(
@@ -115,7 +130,7 @@ fn downsample_mip_2(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
     }
 }
 
-fn downsample_mip_3(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
+fn downsample_mip_3(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: u32) {
     if local_id < 16u {
         let idx = coord.y * 16 + coord.x;
         let v = reduce_4(vec4(
@@ -129,7 +144,7 @@ fn downsample_mip_3(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
     }
 }
 
-fn downsample_mip_4(coord: vec2<u32>, workgroup_id: vec2u, local_id: u32) {
+fn downsample_mip_4(coord: vec2<u32>, workgroup_id: vec2<u32>, local_id: u32) {
     if local_id < 4u {
         let idx = coord.y * 16 + coord.x;
         let v = reduce_4(vec4(
@@ -155,12 +170,123 @@ fn downsample_mip_5(workgroup_id: vec2<u32>, local_id: u32) {
     }
 }
 
+fn downsample_mips_6_and_7(coord: vec2<u32>) {
+    var v: vec4<f32>;
+
+    var texel_1 = coord * 2;
+    var texel_0 = texel_1 * 2;
+    v[0] = reduce_load_mip_6(texel_0);
+    textureStore(mip_7, texel_1, vec4(v[0]));
+
+    texel_1 = vec2(coord.x * 2 + 1, coord.y * 2);
+    texel_0 = texel_1 * 2;
+    v[1] = reduce_load_mip_6(texel_0);
+    textureStore(mip_7, texel_1, vec4(v[1]));
+
+    texel_1 = vec2(coord.x * 2, coord.y * 2 + 1);
+    texel_0 = texel_1 * 2;
+    v[2] = reduce_load_mip_6(texel_0);
+    textureStore(mip_7, texel_1, vec4(v[2]));
+
+    texel_1 = vec2(coord.x * 2 + 1, coord.y * 2 + 1);
+    texel_0 = texel_1 * 2;
+    v[3] = reduce_load_mip_6(texel_0);
+    textureStore(mip_7, texel_1, vec4(v[3]));
+
+    if constants.max_mip_level <= 7 { return; }
+
+    let vr = reduce_4(v);
+    textureStore(mip_8, coord, vec4(vr));
+    shared_memory[coord.y * 16 + coord.x] = vr;
+}
+
+fn downsample_mips_8_to_11(coord: vec2<u32>, local_id: u32) {
+    if constants.max_mip_level <= 8u { return; }
+    workgroupBarrier();
+    downsample_mip_8(coord, local_id);
+
+    if constants.max_mip_level <= 9u { return; }
+    workgroupBarrier();
+    downsample_mip_9(coord, local_id);
+
+    if constants.max_mip_level <= 10u { return; }
+    workgroupBarrier();
+    downsample_mip_10(coord, local_id);
+
+    if constants.max_mip_level <= 11u { return; }
+    workgroupBarrier();
+    downsample_mip_11(local_id);
+}
+
+fn downsample_mip_8(coord: vec2<u32>, local_id: u32) {
+    if local_id < 64u {
+        let idx = coord.y * 16 + coord.x;
+        let v = reduce_4(vec4(
+            shared_memory[idx * 2],
+            shared_memory[idx * 2 + 1],
+            shared_memory[idx * 2 + 16],
+            shared_memory[idx * 2 + 1 + 16],
+        ));
+        textureStore(mip_9, coord, vec4(v));
+        shared_memory[idx * 2 + coord.y % 2] = v;
+    }
+}
+
+fn downsample_mip_9(coord: vec2<u32>, local_id: u32) {
+    if local_id < 16u {
+        let idx = coord.y * 16 + coord.x;
+        let v = reduce_4(vec4(
+            shared_memory[idx * 4],
+            shared_memory[idx * 4 + 2],
+            shared_memory[idx * 4 + 1 + 32],
+            shared_memory[idx * 4 + 3 + 32],
+        ));
+        textureStore(mip_10, coord, vec4(v));
+        shared_memory[idx * 4 + coord.y] = v;
+    }
+}
+
+fn downsample_mip_10(coord: vec2<u32>, local_id: u32) {
+    if local_id < 4u {
+        let idx = coord.y * 16 + coord.x;
+        let v = reduce_4(vec4(
+            shared_memory[idx * 8 + coord.y * 2],
+            shared_memory[idx * 8 + 4 + coord.y * 2],
+            shared_memory[idx * 8 + 1 + coord.y * 2 + 64],
+            shared_memory[idx * 8 + 4 + 1 + coord.y * 2 + 64],
+        ));
+        textureStore(mip_11, coord, vec4(v));
+        shared_memory[coord.x + coord.y * 2u] = v;
+    }
+}
+
+fn downsample_mip_11(local_id: u32) {
+    if local_id < 1u {
+        let v = reduce_4(vec4(
+            shared_memory[0],
+            shared_memory[1],
+            shared_memory[2],
+            shared_memory[3],
+        ));
+        textureStore(mip_12, vec2(0), vec4(v));
+    }
+}
+
 fn reduce_load_mip_0(coord: vec2<u32>) -> f32 {
     let a = load_mip_0(coord);
     let b = load_mip_0(vec2(coord.x, coord.y + 1));
     let c = load_mip_0(vec2(coord.x + 1, coord.y));
     let d = load_mip_0(coord + 1);
     return reduce_4(vec4(a, b, c, d));
+}
+
+fn reduce_load_mip_6(coord: vec2<u32>) -> f32 {
+    return reduce_4(vec4(
+        textureLoad(mip_6, coord).r,
+        textureLoad(mip_6, vec2(coord.x, coord.y + 1)).r,
+        textureLoad(mip_6, vec2(coord.x + 1, coord.y)).r,
+        textureLoad(mip_6, coord + 1).r,
+    ));
 }
 
 fn load_mip_0(coord: vec2<u32>) -> f32 {
@@ -177,7 +303,7 @@ fn load_mip_0(coord: vec2<u32>) -> f32 {
 
 fn load_mip_0_gather(uv: vec2<f32>) -> vec4<f32> {
     let uv0 = vec2<u32>(floor(uv - 0.5));
-    let uv1 = uv0 + 1u;
+    let uv1 = min(uv0 + 1u, textureDimensions(mip_0).xy - 1);
     return vec4(
         bitcast<f32>(u32(textureLoad(mip_0, vec2(uv0.x, uv0.y)).r >> 32)),
         bitcast<f32>(u32(textureLoad(mip_0, vec2(uv0.x, uv1.y)).r >> 32)),

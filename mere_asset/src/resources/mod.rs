@@ -4,9 +4,11 @@ use crate::{
 };
 use mere_mesh::Meshlet;
 use render_resources::*;
+use depth_pyramid::DepthPyramid;
 use wgpu::util::DeviceExt;
 
 mod render_resources;
+mod depth_pyramid;
 
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
@@ -28,7 +30,6 @@ pub struct ResourceStorage {
     pub meshlet_read_attributes_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
     pub resolve_material_depth_bind_group_layout: wgpu::BindGroupLayout,
-    pub downsample_depth_bind_group_layout: wgpu::BindGroupLayout,
 
     pub debug_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -182,70 +183,6 @@ impl ResourceStorage {
                     Some("render_view_bind_group_layout"),
                     wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     &mut [storage_buffer(true)],
-                )
-                .get(),
-            ),
-            downsample_depth_bind_group_layout: device.create_bind_group_layout(
-                &Layout::sequential(
-                    Some("downsample_depth_bind_group_layout"),
-                    wgpu::ShaderStages::COMPUTE,
-                    &mut [
-                        storage_texture(
-                            wgpu::TextureFormat::R64Uint,
-                            wgpu::StorageTextureAccess::ReadOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::ReadWrite,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        storage_texture(
-                            wgpu::TextureFormat::R32Float,
-                            wgpu::StorageTextureAccess::WriteOnly,
-                        ),
-                        entry(wgpu::BindingType::Sampler(
-                            wgpu::SamplerBindingType::NonFiltering,
-                        )),
-                    ],
                 )
                 .get(),
             ),
@@ -508,7 +445,7 @@ impl ResourceStorage {
             }),
             downsample_depth_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("downsample_depth_bind_group"),
-                layout: &self.downsample_depth_bind_group_layout,
+                layout: &self.depth_pyramid.downsample_depth_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -691,92 +628,4 @@ impl ResourceStorage {
         };
         total
     }
-}
-
-struct Layout<'a> {
-    label: Option<&'a str>,
-    entries: Vec<wgpu::BindGroupLayoutEntry>,
-}
-
-impl<'a> Layout<'a> {
-    fn sequential(
-        label: Option<&'a str>,
-        visibility: wgpu::ShaderStages,
-        entries: &[wgpu::BindGroupLayoutEntry],
-    ) -> Self {
-        let entries = entries
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let mut entry = layout_entry(i as u32, e.ty);
-                entry.visibility = visibility;
-                entry
-            })
-            .collect();
-
-        Self { label, entries }
-    }
-
-    fn with(&mut self, mut entry: wgpu::BindGroupLayoutEntry) -> &mut Self {
-        entry.binding = self.entries.len() as u32;
-        self.entries.push(entry);
-        self
-    }
-
-    fn get(&self) -> wgpu::BindGroupLayoutDescriptor<'_> {
-        wgpu::BindGroupLayoutDescriptor {
-            label: self.label,
-            entries: &self.entries,
-        }
-    }
-}
-
-const fn entry(ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
-    layout_entry(0, ty)
-}
-
-const fn storage_buffer(read_only: bool) -> wgpu::BindGroupLayoutEntry {
-    storage_buffer_layout_entry(0, read_only)
-}
-
-const fn storage_texture(
-    format: wgpu::TextureFormat,
-    access: wgpu::StorageTextureAccess,
-) -> wgpu::BindGroupLayoutEntry {
-    storage_texture_layout_entry(0, format, access)
-}
-
-const fn layout_entry(binding: u32, ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::empty(),
-        ty,
-        count: None,
-    }
-}
-
-const fn storage_buffer_layout_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
-    layout_entry(
-        binding,
-        wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-    )
-}
-
-const fn storage_texture_layout_entry(
-    binding: u32,
-    format: wgpu::TextureFormat,
-    access: wgpu::StorageTextureAccess,
-) -> wgpu::BindGroupLayoutEntry {
-    layout_entry(
-        binding,
-        wgpu::BindingType::StorageTexture {
-            access,
-            format,
-            view_dimension: wgpu::TextureViewDimension::D2,
-        },
-    )
 }

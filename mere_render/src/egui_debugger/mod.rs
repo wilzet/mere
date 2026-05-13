@@ -100,6 +100,7 @@ impl EguiRenderer {
         lock_view: &mut bool,
     ) {
         debug::debugger(
+            &mut self.renderer,
             &mut self.debug_memory,
             debug,
             profiler,

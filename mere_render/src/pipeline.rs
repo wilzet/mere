@@ -5,7 +5,6 @@ pub struct Pipelines {
     instance_cull_pipeline: wgpu::ComputePipeline,
     cluster_cull_pipeline: wgpu::ComputePipeline,
     visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
-    downsample_depth_pipeline: wgpu::ComputePipeline,
     resolve_material_depth_pipeline: wgpu::RenderPipeline,
     material_pipeline: wgpu::RenderPipeline,
 }
@@ -92,22 +91,6 @@ impl Pipelines {
             )
         };
 
-        let downsample_depth_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("downsample_depth_pipeline_layout"),
-                bind_group_layouts: &[Some(&world.resources().downsample_depth_bind_group_layout)],
-                immediate_size: 4,
-            });
-
-            create_compute_pipeline(
-                Some("downsample_depth_pipeline"),
-                device,
-                Some(&layout),
-                wgpu::include_wgsl!("downsample_depth.wgsl"),
-                "downsample_depth_first",
-            )
-        };
-
         let resolve_material_depth_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("resolve_material_depth_pipeline"),
@@ -170,7 +153,6 @@ impl Pipelines {
             instance_cull_pipeline,
             cluster_cull_pipeline,
             visibility_buffer_raster_pipeline,
-            downsample_depth_pipeline,
             resolve_material_depth_pipeline,
             material_pipeline,
         }
@@ -183,7 +165,6 @@ impl Pipelines {
         &wgpu::ComputePipeline,
         &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
-        &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
         &wgpu::RenderPipeline,
     ) {
@@ -192,7 +173,6 @@ impl Pipelines {
             &self.instance_cull_pipeline,
             &self.cluster_cull_pipeline,
             &self.visibility_buffer_raster_pipeline,
-            &self.downsample_depth_pipeline,
             &self.resolve_material_depth_pipeline,
             &self.material_pipeline,
         )
