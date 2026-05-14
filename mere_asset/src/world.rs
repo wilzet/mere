@@ -37,7 +37,7 @@ impl World {
             config.width,
             config.height,
             0.1,
-            100.0,
+            200.0,
             Vec3::new(0.0, 10.0, -10.0),
         );
         main_camera.look_at(Vec3::ZERO);

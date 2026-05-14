@@ -380,161 +380,153 @@ impl ResourceStorage {
                     }],
                 },
             ),
-            instance_cull_first_bind_group: device.create_bind_group(
-                &wgpu::BindGroupDescriptor {
-                    label: Some("instance_cull_first_bind_group"),
-                    layout: &self.instance_cull_first_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: instances.instance_uniforms.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: instances.instance_aabbs.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: instances.instance_meshlet_offsets.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: instances.instance_meshlet_counts.binding().unwrap(),
-                        },
-                        self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: visible_instance_cluster_count.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: cluster_first_indirect_args.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 8,
-                            resource: second_pass_instance_candidates.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 9,
-                            resource: instance_second_indirect_args.as_entire_binding(),
-                        },
-                    ],
-                },
-            ),
-            instance_cull_second_bind_group: device.create_bind_group(
-                &wgpu::BindGroupDescriptor {
-                    label: Some("instance_cull_second_bind_group"),
-                    layout: &self.instance_cull_second_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: instances.instance_uniforms.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: instances.instance_aabbs.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: instances.instance_meshlet_offsets.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: instances.instance_meshlet_counts.binding().unwrap(),
-                        },
-                        self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: visible_instance_cluster_count.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: cluster_first_indirect_args.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 8,
-                            resource: second_pass_instance_candidates.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 9,
-                            resource: instance_second_indirect_args.as_entire_binding(),
-                        },
-                    ],
-                },
-            ),
-            cluster_cull_first_bind_group: device.create_bind_group(
-                &wgpu::BindGroupDescriptor {
-                    label: Some("cluster_cull_first_bind_group"),
-                    layout: &self.cluster_cull_first_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: instances.instance_uniforms.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: meshlets.meshlets.binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: visible_instance_cluster_count.as_entire_binding(),
-                        },
-                        self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: self.visible_cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: indirect_draw_args.as_entire_binding(),
-                        },
-                    ],
-                },
-            ),
-            cluster_cull_second_bind_group: device.create_bind_group(
-                &wgpu::BindGroupDescriptor {
-                    label: Some("cluster_cull_second_bind_group"),
-                    layout: &self.cluster_cull_second_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: instances.instance_uniforms.binding().unwrap(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: meshlets.meshlets.binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: self.cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: visible_instance_cluster_count.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: self.visible_cluster_info.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: indirect_draw_args.as_entire_binding(),
-                        },
-                    ],
-                },
-            ),
+            instance_cull_first_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("instance_cull_first_bind_group"),
+                layout: &self.instance_cull_first_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: instances.instance_uniforms.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: instances.instance_aabbs.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: instances.instance_meshlet_offsets.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: instances.instance_meshlet_counts.binding().unwrap(),
+                    },
+                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: cluster_first_indirect_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: second_pass_instance_candidates.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: instance_second_indirect_args.as_entire_binding(),
+                    },
+                ],
+            }),
+            instance_cull_second_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("instance_cull_second_bind_group"),
+                layout: &self.instance_cull_second_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: instances.instance_uniforms.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: instances.instance_aabbs.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: instances.instance_meshlet_offsets.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: instances.instance_meshlet_counts.binding().unwrap(),
+                    },
+                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: cluster_first_indirect_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: second_pass_instance_candidates.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: instance_second_indirect_args.as_entire_binding(),
+                    },
+                ],
+            }),
+            cluster_cull_first_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cluster_cull_first_bind_group"),
+                layout: &self.cluster_cull_first_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: instances.instance_uniforms.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: meshlets.meshlets.binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: self.visible_cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: indirect_draw_args.as_entire_binding(),
+                    },
+                ],
+            }),
+            cluster_cull_second_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cluster_cull_second_bind_group"),
+                layout: &self.cluster_cull_second_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: instances.instance_uniforms.binding().unwrap(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: meshlets.meshlets.binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.visible_cluster_info.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: indirect_draw_args.as_entire_binding(),
+                    },
+                ],
+            }),
             visibility_buffer_raster_bind_group: device.create_bind_group(
                 &wgpu::BindGroupDescriptor {
                     label: Some("visibility_buffer_raster_bind_group"),
@@ -804,8 +796,8 @@ impl ResourceStorage {
         total += self.material_depth.size_in_bytes();
         total += self.depth_pyramid.depth_pyramid.size_in_bytes();
         total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
-            (per_frame.indirect_draw_args.size()
-                + per_frame.cluster_first_indirect_args.size()) as usize
+            (per_frame.indirect_draw_args.size() + per_frame.cluster_first_indirect_args.size())
+                as usize
         } else {
             8
         };

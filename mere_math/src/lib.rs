@@ -2,5 +2,5 @@
 
 mod transform;
 
-pub use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4, Vec4Swizzles};
+pub use glam::{EulerRot, Mat3, Mat4, Quat, Vec2, Vec3, Vec4, Vec4Swizzles};
 pub use transform::Transform;

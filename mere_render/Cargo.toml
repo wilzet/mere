@@ -14,5 +14,6 @@ mere_asset = { version = "0.1.0", path = "../mere_asset" }
 mere_log = { version = "0.1.0", path = "../mere_log" }
 mere_math = { version = "0.1.0", path = "../mere_math" }
 mere_mesh = { version = "0.1.0", path = "../mere_mesh" }
+rand = "0.10.1"
 wgpu.workspace = true
 winit = "0.30.13"

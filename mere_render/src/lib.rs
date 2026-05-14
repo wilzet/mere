@@ -1,7 +1,8 @@
 use crate::{camera::CameraController, egui_debugger::EguiRenderer, renderer::Renderer};
 use mere_asset::World;
 use mere_log::Profiler;
-use mere_math::{Transform, Vec3};
+use mere_math::{EulerRot, Quat, Transform, Vec3};
+use rand::RngExt;
 use std::{sync::Arc, time::Duration};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -95,22 +96,30 @@ impl State {
         //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
         let teapot_handle = world.load_gltf("utah_teapot", device, queue)?[0];
         let teapot = world.get_instance(teapot_handle).unwrap().clone();
-        for x in 0..10 {
-            for y in 0..10 {
-                for z in 0..10 {
-                    if x == 0 && y == 0 && z == 0 {
-                        continue;
-                    }
 
-                    world.add_instance(
-                        Transform::new()
-                            .with_translation(Vec3::new(x as f32, y as f32, z as f32) * 6.0)
-                            .with_rotation(teapot.transform.rotation),
-                        teapot.meshlet_mesh,
-                        teapot.material,
-                    );
-                }
-            }
+        let mut rng = rand::rng();
+
+        for _ in 0..64000 {
+            // Generate random position within 0.0 to 500.0 for each axis
+            let x = rng.random_range(0.0..200.0);
+            let y = rng.random_range(0.0..200.0);
+            let z = rng.random_range(0.0..200.0);
+
+            // Generate a completely random rotation (Quaternion)
+            let rotation = Quat::from_euler(
+                EulerRot::XYZ,
+                rng.random_range(0.0..std::f32::consts::TAU),
+                rng.random_range(0.0..std::f32::consts::TAU),
+                rng.random_range(0.0..std::f32::consts::TAU),
+            );
+
+            world.add_instance(
+                Transform::new()
+                    .with_translation(Vec3::new(x, y, z))
+                    .with_rotation(rotation),
+                teapot.meshlet_mesh,
+                teapot.material,
+            );
         }
 
         let camera_controller = CameraController::new(5.0, 0.002);

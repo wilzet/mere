@@ -237,7 +237,9 @@ impl Renderer {
             instance_cull_pass.set_pipeline(instance_cull_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
-                &per_frame_resources.bind_groups.instance_cull_first_bind_group,
+                &per_frame_resources
+                    .bind_groups
+                    .instance_cull_first_bind_group,
                 &[],
             );
             instance_cull_pass.set_bind_group(
@@ -263,7 +265,9 @@ impl Renderer {
             cluster_cull_pass.set_pipeline(cluster_cull_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
-                &per_frame_resources.bind_groups.cluster_cull_first_bind_group,
+                &per_frame_resources
+                    .bind_groups
+                    .cluster_cull_first_bind_group,
                 &[],
             );
             cluster_cull_pass.set_bind_group(
