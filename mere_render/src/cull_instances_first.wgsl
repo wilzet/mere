@@ -182,7 +182,7 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
         let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
         // Target a mip where the AABB is roughly 4x4 texels
-        var mip = max(firstLeadingBit(max_size) + 1, 2) - 2;
+        var mip = max(0, firstLeadingBit(max_size) - 3);
 
         // Check if the AABB spans more than 4 texels at this mip
         if any((max_texel >> vec2(mip)) > ((min_texel >> vec2(mip)) + 3)) {
@@ -235,6 +235,9 @@ fn cull_instances(
 
         if visible {
             shared_cluster_base = atomicAdd(&visible_instance_cluster_count, meshlet_count);
+
+            let required_workgroups = (shared_cluster_base + meshlet_count + 127) / 128;
+            atomicMax(&cluster_indirect_args.x, required_workgroups);
         }
     }
 
@@ -249,11 +252,6 @@ fn cull_instances(
             let meshlet_id = meshlet_base + i;
 
             cluster_info[cluster_id] = ClusterInfo(instance_id, meshlet_id);
-        }
-
-        if local_id.x == 0 {
-            let required_workgroups = (cluster_base + meshlet_count + 127) / 128;
-            atomicMax(&cluster_indirect_args.x, required_workgroups);
         }
     }
 }

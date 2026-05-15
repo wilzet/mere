@@ -9,6 +9,7 @@ pub struct MeshletBindGroups {
     pub cluster_cull_first_bind_group: wgpu::BindGroup,
     pub cluster_cull_second_bind_group: wgpu::BindGroup,
     pub visibility_buffer_raster_bind_group: wgpu::BindGroup,
+    pub fill_counts_bind_group: wgpu::BindGroup,
     pub meshlet_read_attributes_bind_group: wgpu::BindGroup,
     pub main_render_view_bind_group: wgpu::BindGroup,
     pub culling_render_view_bind_group: wgpu::BindGroup,
@@ -18,11 +19,9 @@ pub struct MeshletBindGroups {
 
 #[derive(Clone, Debug)]
 pub struct PerFrameResources {
-    pub visibility_buffer: wgpu::TextureView,
     pub dummy_render_target: wgpu::TextureView,
     pub instance_second_indirect_args: wgpu::Buffer,
-    pub cluster_first_indirect_args: wgpu::Buffer,
-    pub cluster_second_indirect_args: wgpu::Buffer,
+    pub cluster_indirect_args: wgpu::Buffer,
     pub indirect_draw_args: wgpu::Buffer,
     pub bind_groups: MeshletBindGroups,
 }

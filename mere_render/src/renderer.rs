@@ -191,9 +191,12 @@ impl Renderer {
 
         let (
             visibility_buffer_clear_pipeline,
-            instance_cull_pipeline,
-            cluster_cull_pipeline,
+            instance_cull_first_pipeline,
+            instance_cull_second_pipeline,
+            cluster_cull_first_pipeline,
+            cluster_cull_second_pipeline,
             visibility_buffer_raster_pipeline,
+            fill_counts_pipeline,
             resolve_material_depth_pipeline,
             material_pipeline,
         ) = self.pipelines.get();
@@ -234,7 +237,7 @@ impl Renderer {
                 label: Some("instance_cull_first_pass"),
                 timestamp_writes,
             });
-            instance_cull_pass.set_pipeline(instance_cull_pipeline);
+            instance_cull_pass.set_pipeline(instance_cull_first_pipeline);
             instance_cull_pass.set_bind_group(
                 0,
                 &per_frame_resources
@@ -262,7 +265,7 @@ impl Renderer {
                 label: Some("cluster_cull_first_pass"),
                 timestamp_writes,
             });
-            cluster_cull_pass.set_pipeline(cluster_cull_pipeline);
+            cluster_cull_pass.set_pipeline(cluster_cull_first_pipeline);
             cluster_cull_pass.set_bind_group(
                 0,
                 &per_frame_resources
@@ -279,16 +282,16 @@ impl Renderer {
             );
 
             cluster_cull_pass
-                .dispatch_workgroups_indirect(&per_frame_resources.cluster_first_indirect_args, 0);
+                .dispatch_workgroups_indirect(&per_frame_resources.cluster_indirect_args, 0);
 
             profiler.end();
         }
 
         {
-            let timestamp_writes = profiler.begin("visibility_buffer_raster_pass");
+            let timestamp_writes = profiler.begin("visibility_buffer_first_raster_pass");
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("visibility_buffer_raster_pass"),
+                label: Some("visibility_buffer_first_raster_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &per_frame_resources.dummy_render_target,
                     resolve_target: None,
@@ -321,6 +324,137 @@ impl Renderer {
             render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
 
             profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("fill_counts_pass");
+
+            let mut fill_counts_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fill_counts_pass"),
+                timestamp_writes,
+            });
+
+            fill_counts_pass.set_pipeline(fill_counts_pipeline);
+            fill_counts_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.fill_counts_bind_group,
+                &[],
+            );
+
+            fill_counts_pass.dispatch_workgroups(1, 1, 1);
+
+            profiler.end();
+        }
+
+        if !lock_view {
+            resources
+                .depth_pyramid
+                .downsample(encoder, per_frame_resources, profiler);
+        }
+
+        {
+            let timestamp_writes = profiler.begin("instance_cull_second_pass");
+
+            let mut instance_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("instance_cull_second_pass"),
+                timestamp_writes,
+            });
+            instance_cull_pass.set_pipeline(instance_cull_second_pipeline);
+            instance_cull_pass.set_bind_group(
+                0,
+                &per_frame_resources
+                    .bind_groups
+                    .instance_cull_second_bind_group,
+                &[],
+            );
+            instance_cull_pass.set_bind_group(
+                1,
+                &per_frame_resources
+                    .bind_groups
+                    .culling_render_view_bind_group,
+                &[],
+            );
+
+            instance_cull_pass.dispatch_workgroups_indirect(
+                &per_frame_resources.instance_second_indirect_args,
+                0,
+            );
+
+            profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("cluster_cull_second_pass");
+
+            let mut cluster_cull_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("cluster_cull_second_pass"),
+                timestamp_writes,
+            });
+            cluster_cull_pass.set_pipeline(cluster_cull_second_pipeline);
+            cluster_cull_pass.set_bind_group(
+                0,
+                &per_frame_resources
+                    .bind_groups
+                    .cluster_cull_second_bind_group,
+                &[],
+            );
+            cluster_cull_pass.set_bind_group(
+                1,
+                &per_frame_resources
+                    .bind_groups
+                    .culling_render_view_bind_group,
+                &[],
+            );
+
+            cluster_cull_pass
+                .dispatch_workgroups_indirect(&per_frame_resources.cluster_indirect_args, 0);
+
+            profiler.end();
+        }
+
+        {
+            let timestamp_writes = profiler.begin("visibility_buffer_second_raster_pass");
+
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visibility_buffer_second_raster_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &per_frame_resources.dummy_render_target,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(visibility_buffer_raster_pipeline);
+            render_pass.set_bind_group(
+                0,
+                &per_frame_resources.bind_groups.main_render_view_bind_group,
+                &[],
+            );
+            render_pass.set_bind_group(
+                1,
+                &per_frame_resources
+                    .bind_groups
+                    .visibility_buffer_raster_bind_group,
+                &[],
+            );
+
+            render_pass.draw_indirect(&per_frame_resources.indirect_draw_args, 0);
+
+            profiler.end();
+        }
+
+        if !lock_view {
+            resources
+                .depth_pyramid
+                .downsample(encoder, per_frame_resources, profiler);
         }
 
         {
@@ -404,12 +538,6 @@ impl Renderer {
             }
 
             profiler.end();
-        }
-
-        if !lock_view {
-            resources
-                .depth_pyramid
-                .downsample(encoder, per_frame_resources, profiler);
         }
     }
 }

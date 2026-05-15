@@ -7,6 +7,7 @@ pub struct Pipelines {
     cluster_cull_first_pipeline: wgpu::ComputePipeline,
     cluster_cull_second_pipeline: wgpu::ComputePipeline,
     visibility_buffer_raster_pipeline: wgpu::RenderPipeline,
+    fill_counts_pipeline: wgpu::ComputePipeline,
     resolve_material_depth_pipeline: wgpu::RenderPipeline,
     material_pipeline: wgpu::RenderPipeline,
 }
@@ -131,6 +132,22 @@ impl Pipelines {
             )
         };
 
+        let fill_counts_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("fill_counts_pipeline_layout"),
+                bind_group_layouts: &[Some(&world.resources().fill_counts_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+            create_compute_pipeline(
+                Some("fill_counts_pipeline"),
+                device,
+                Some(&layout),
+                wgpu::include_wgsl!("fill_counts.wgsl"),
+                "fill_counts",
+            )
+        };
+
         let resolve_material_depth_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("resolve_material_depth_pipeline"),
@@ -195,6 +212,7 @@ impl Pipelines {
             cluster_cull_first_pipeline,
             cluster_cull_second_pipeline,
             visibility_buffer_raster_pipeline,
+            fill_counts_pipeline,
             resolve_material_depth_pipeline,
             material_pipeline,
         }
@@ -206,15 +224,21 @@ impl Pipelines {
         &wgpu::ComputePipeline,
         &wgpu::ComputePipeline,
         &wgpu::ComputePipeline,
+        &wgpu::ComputePipeline,
+        &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
+        &wgpu::ComputePipeline,
         &wgpu::RenderPipeline,
         &wgpu::RenderPipeline,
     ) {
         (
             &self.visibility_buffer_clear_pipeline,
             &self.instance_cull_first_pipeline,
+            &self.instance_cull_second_pipeline,
             &self.cluster_cull_first_pipeline,
+            &self.cluster_cull_second_pipeline,
             &self.visibility_buffer_raster_pipeline,
+            &self.fill_counts_pipeline,
             &self.resolve_material_depth_pipeline,
             &self.material_pipeline,
         )

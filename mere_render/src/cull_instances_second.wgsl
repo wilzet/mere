@@ -45,44 +45,9 @@ struct DispatchIndirectArgs {
 @group(0) @binding(6) var<storage, read_write> visible_instance_cluster_count: atomic<u32>;
 @group(0) @binding(7) var<storage, read_write> cluster_indirect_args: DispatchIndirectArgs;
 
-@group(0) @binding(8) var<storage, read_write> second_pass_candidates: array<u32>;
-@group(0) @binding(9) var<storage, read_write> second_pass_indirect_args: DispatchIndirectArgs;
+@group(0) @binding(8) var<storage, read> second_pass_candidates: array<u32>;
 
 @group(1) @binding(0) var<uniform> render_view: RenderView;
-
-var<workgroup> shared_cluster_base: u32;
-
-fn is_outside_frustum(instance_id: u32, local_aabb: Aabb) -> bool {
-    let m = instances[instance_id].model_matrix;
-    let model_matrix = transpose(mat4x4(
-        m[0],
-        m[1],
-        m[2],
-        vec4(0.0, 0.0, 0.0, 1.0),
-    ));
-
-    let local_center = vec3(local_aabb.center_x, local_aabb.center_y, local_aabb.center_z);
-    let local_extents = vec3(local_aabb.half_extents_x, local_aabb.half_extents_y, local_aabb.half_extents_z);
-
-    let world_center = (model_matrix * vec4(local_center, 1.0)).xyz;
-    let world_extents = vec3(
-        dot(abs(m[0].xyz), local_extents),
-        dot(abs(m[1].xyz), local_extents),
-        dot(abs(m[2].xyz), local_extents)
-    );
-
-    for (var i = 0u; i < 6u; i = i + 1u) {
-        let plane = render_view.planes[i];
-        let radius = dot(abs(plane.xyz), world_extents);
-        let distance = dot(plane.xyz, world_center) + plane.w;
-
-        if distance < -radius {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 struct ScreenAabb {
     min: vec3<f32>,
@@ -146,8 +111,16 @@ fn project_aabb(clip_from_local: mat4x4<f32>, near: f32, local_aabb: Aabb, out: 
     return true;
 }
 
+fn gather_hzb_row(x: vec4<u32>, y: u32, mip: u32) -> f32 {
+    let d0 = textureLoad(depth_pyramid, vec2(x.x, y), mip).r;
+    let d1 = textureLoad(depth_pyramid, vec2(x.y, y), mip).r;
+    let d2 = textureLoad(depth_pyramid, vec2(x.z, y), mip).r;
+    let d3 = textureLoad(depth_pyramid, vec2(x.w, y), mip).r;
+    return min(min(d0, d1), min(d2, d3));
+}
+
 fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
-    let projection = render_view.previous_view_proj;
+    let projection = render_view.view_proj;
     var near: f32;
     if projection[3][3] == 1.0 {
         near = projection[3][2] / projection[2][2];
@@ -155,76 +128,89 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
         near = projection[3][2];
     }
 
-    let prev_m = instances[instance_id].previous_model_matrix;
+    let m = instances[instance_id].model_matrix;
     let model_matrix = transpose(mat4x4(
-        prev_m[0],
-        prev_m[1],
-        prev_m[2],
+        m[0],
+        m[1],
+        m[2],
         vec4(0.0, 0.0, 0.0, 1.0),
     ));
 
     let clip_from_local = projection * model_matrix;
     var screen_aabb = ScreenAabb(vec3(0.0), vec3(0.0));
     if project_aabb(clip_from_local, near, local_aabb, &screen_aabb) {
-        let view_size = render_view.viewport.zw;
-        let rect_size_px = (screen_aabb.max.xy - screen_aabb.min.xy) * view_size;
+        let hzb_size = vec2<f32>(textureDimensions(depth_pyramid).xy);
 
-        // We want a mip where the AABB covers ~2x2 texels to minimize samples
-        let mip = i32(max(0.0, ceil(log2(max(rect_size_px.x, rect_size_px.y)))));
-        let depth_size = vec2<f32>(textureDimensions(depth_pyramid, mip));
-        let pixel_coords = vec2<u32>(screen_aabb.min.xy * depth_size);
+        let aabb_min_px = screen_aabb.min.xy * hzb_size;
+        let aabb_max_px = screen_aabb.max.xy * hzb_size;
 
-        // Gather the 4 texels covering the area
-        let d0 = textureLoad(depth_pyramid, pixel_coords, mip).r;
-        let d1 = textureLoad(depth_pyramid, pixel_coords + vec2(1, 0), mip).r;
-        let d2 = textureLoad(depth_pyramid, pixel_coords + vec2(0, 1), mip).r;
-        let d3 = textureLoad(depth_pyramid, pixel_coords + vec2(1, 1), mip).r;
+        let min_texel = vec2<u32>(max(aabb_min_px, vec2<f32>(0.0)));
+        let max_texel = vec2<u32>(min(aabb_max_px, hzb_size - 1.0));
+        let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
-        // For Reversed-Z: The object is occluded if its NEAREST point
-        // is LESS than the FARTHEST point in the depth buffer
-        let max_depth_in_pyramid = max(max(d0, d1), max(d2, d3));
+        // Target a mip where the AABB is roughly 4x4 texels
+        var mip = max(0, firstLeadingBit(max_size) - 3);
 
-        return screen_aabb.max.z < max_depth_in_pyramid;
+        // Check if the AABB spans more than 4 texels at this mip
+        if any((max_texel >> vec2(mip)) > ((min_texel >> vec2(mip)) + 3)) {
+            mip += 1;
+        }
+
+        let smin = min_texel >> vec2(mip);
+        let smax = max_texel >> vec2(mip);
+
+        // Cover a 4x4 area with four 2x2 gathers:
+        let cx = min(smin.x + vec4(0, 1, 2, 3), smax.xxxx);
+        let cy = min(smin.y + vec4(0, 1, 2, 3), smax.yyyy);
+
+        let d0 = gather_hzb_row(cx, cy.x, mip);
+        let d1 = gather_hzb_row(cx, cy.y, mip);
+        let d2 = gather_hzb_row(cx, cy.z, mip);
+        let d3 = gather_hzb_row(cx, cy.w, mip);
+
+        let curr_depth = min(min(d0, d1), min(d2, d3));
+
+        return screen_aabb.max.z <= curr_depth;
     }
 
     return false;
 }
+
+var<workgroup> shared_cluster_base: u32;
+var<workgroup> visible: bool;
 
 @compute @workgroup_size(1024, 1, 1)
 fn cull_instances(
     @builtin(workgroup_id) block_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let instance_id = block_id.x;
-    let aabb = instance_aabbs[instance_id];
-
-    if is_outside_frustum(instance_id, aabb) { return; }
-
-    if is_occluded(instance_id, aabb) {
-        let id = atomicAdd(&second_pass_indirect_args.x, 1);
-        second_pass_candidates[id] = instance_id;
-        return;
-    }
-
+    let instance_id = second_pass_candidates[block_id.x];
     let meshlet_count = instance_meshlet_counts[instance_id];
-    let meshlet_base = instance_meshlet_offsets[instance_id];
 
     if local_id.x == 0 {
-        shared_cluster_base = atomicAdd(&visible_instance_cluster_count, meshlet_count);
+        let aabb = instance_aabbs[instance_id];
+
+        visible = !is_occluded(instance_id, aabb);
+
+        if visible {
+            shared_cluster_base = atomicAdd(&visible_instance_cluster_count, meshlet_count);
+
+            let required_workgroups = (shared_cluster_base + meshlet_count + 127) / 128;
+            atomicMax(&cluster_indirect_args.x, required_workgroups);
+        }
     }
 
     workgroupBarrier();
-    let cluster_base = shared_cluster_base;
 
-    for (var i = local_id.x; i < meshlet_count; i += 1024u) {
-        let cluster_id = cluster_base + i;
-        let meshlet_id = meshlet_base + i;
+    if visible {
+        let cluster_base = shared_cluster_base;
+        let meshlet_base = instance_meshlet_offsets[instance_id];
 
-        cluster_info[cluster_id] = ClusterInfo(instance_id, meshlet_id);
-    }
+        for (var i = local_id.x; i < meshlet_count; i += 1024u) {
+            let cluster_id = cluster_base + i;
+            let meshlet_id = meshlet_base + i;
 
-    if local_id.x == 0 {
-        let required_workgroups = (cluster_base + meshlet_count + 127) / 128;
-        atomicMax(&cluster_indirect_args.x, required_workgroups);
+            cluster_info[cluster_id] = ClusterInfo(instance_id, meshlet_id);
+        }
     }
 }

@@ -32,6 +32,7 @@ pub struct ResourceStorage {
     pub cluster_cull_first_bind_group_layout: wgpu::BindGroupLayout,
     pub cluster_cull_second_bind_group_layout: wgpu::BindGroupLayout,
     pub visibility_buffer_raster_bind_group_layout: wgpu::BindGroupLayout,
+    pub fill_counts_bind_group_layout: wgpu::BindGroupLayout,
     pub meshlet_read_attributes_bind_group_layout: wgpu::BindGroupLayout,
     pub render_view_bind_group_layout: wgpu::BindGroupLayout,
     pub resolve_material_depth_bind_group_layout: wgpu::BindGroupLayout,
@@ -152,8 +153,7 @@ impl ResourceStorage {
                         storage_buffer(false),
                         storage_buffer(false),
                         storage_buffer(false),
-                        storage_buffer(false),
-                        storage_buffer(false),
+                        storage_buffer(true),
                     ],
                 )
                 .get(),
@@ -187,8 +187,14 @@ impl ResourceStorage {
                         storage_buffer(true),
                         storage_buffer(true),
                         storage_buffer(true),
+                        entry(wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        }),
                         storage_buffer(false),
                         storage_buffer(false),
+                        storage_buffer(true),
                     ],
                 )
                 .get(),
@@ -198,6 +204,7 @@ impl ResourceStorage {
                     Some("visibility_buffer_raster_bind_group_layout"),
                     wgpu::ShaderStages::VERTEX,
                     &mut [
+                        storage_buffer(true),
                         storage_buffer(true),
                         storage_buffer(true),
                         storage_buffer(true),
@@ -214,6 +221,19 @@ impl ResourceStorage {
                     entry.visibility = wgpu::ShaderStages::FRAGMENT;
                     entry
                 })
+                .get(),
+            ),
+            fill_counts_bind_group_layout: device.create_bind_group_layout(
+                &Layout::sequential(
+                    Some("fill_counts_bind_group_layout"),
+                    wgpu::ShaderStages::COMPUTE,
+                    &mut [
+                        storage_buffer(false),
+                        storage_buffer(false),
+                        storage_buffer(false),
+                        storage_buffer(false),
+                    ],
+                )
                 .get(),
             ),
             meshlet_read_attributes_bind_group_layout: device.create_bind_group_layout(
@@ -318,6 +338,12 @@ impl ResourceStorage {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+        let raster_count = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("raster_count"),
+            contents: bytemuck::bytes_of(&0u32),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
         let needed_buffer_size = instances.scene_instance_count as u64 * size_of::<u32>() as u64;
         let second_pass_instance_candidates = match &mut self.second_pass_instance_candidates {
             Some(buffer) if buffer.size() >= needed_buffer_size => buffer.clone(),
@@ -355,19 +381,11 @@ impl ResourceStorage {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let cluster_first_indirect_args =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("first_cluster_indirect_args"),
-                contents: wgpu::util::DispatchIndirectArgs { x: 0, y: 1, z: 1 }.as_bytes(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
-            });
-
-        let cluster_second_indirect_args =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("second_cluster_indirect_args"),
-                contents: wgpu::util::DispatchIndirectArgs { x: 0, y: 1, z: 1 }.as_bytes(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
-            });
+        let cluster_indirect_args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cluster_indirect_args"),
+            contents: wgpu::util::DispatchIndirectArgs { x: 0, y: 1, z: 1 }.as_bytes(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+        });
 
         let bind_groups = MeshletBindGroups {
             visibility_buffer_clear_bind_group: device.create_bind_group(
@@ -411,7 +429,7 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 7,
-                        resource: cluster_first_indirect_args.as_entire_binding(),
+                        resource: cluster_indirect_args.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 8,
@@ -454,15 +472,11 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 7,
-                        resource: cluster_first_indirect_args.as_entire_binding(),
+                        resource: cluster_indirect_args.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 8,
                         resource: second_pass_instance_candidates.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: instance_second_indirect_args.as_entire_binding(),
                     },
                 ],
             }),
@@ -517,13 +531,18 @@ impl ResourceStorage {
                         binding: 3,
                         resource: visible_instance_cluster_count.as_entire_binding(),
                     },
+                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
-                        binding: 4,
+                        binding: 5,
                         resource: self.visible_cluster_info.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 5,
+                        binding: 6,
                         resource: indirect_draw_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: raster_count.as_entire_binding(),
                     },
                 ],
             }),
@@ -558,11 +577,37 @@ impl ResourceStorage {
                         },
                         wgpu::BindGroupEntry {
                             binding: 6,
+                            resource: raster_count.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
                             resource: wgpu::BindingResource::TextureView(&visibility_buffer),
                         },
                     ],
                 },
             ),
+            fill_counts_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fill_counts_bind_group"),
+                layout: &self.fill_counts_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cluster_indirect_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: indirect_draw_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: visible_instance_cluster_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: raster_count.as_entire_binding(),
+                    },
+                ],
+            }),
             meshlet_read_attributes_bind_group: device.create_bind_group(
                 &wgpu::BindGroupDescriptor {
                     label: Some("meshlet_read_attributes_bind_group"),
@@ -727,11 +772,9 @@ impl ResourceStorage {
         };
 
         self.meshlet_per_frame_resources = Some(PerFrameResources {
-            visibility_buffer,
             dummy_render_target,
             instance_second_indirect_args,
-            cluster_first_indirect_args,
-            cluster_second_indirect_args,
+            cluster_indirect_args,
             indirect_draw_args,
             bind_groups,
         });
@@ -791,15 +834,22 @@ impl ResourceStorage {
         total += self.visible_cluster_info.size() as usize;
         total += self.main_render_view.size() as usize;
         total += self.culling_render_view.size() as usize;
-        total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height * 8)
-            as usize;
+        total += if let Some(buffer) = &self.second_pass_instance_candidates {
+            buffer.size() as usize
+        } else {
+            0
+        };
+        total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height)
+            as usize
+            * size_of::<u64>();
         total += self.material_depth.size_in_bytes();
         total += self.depth_pyramid.depth_pyramid.size_in_bytes();
         total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
-            (per_frame.indirect_draw_args.size() + per_frame.cluster_first_indirect_args.size())
-                as usize
+            (per_frame.instance_second_indirect_args.size()
+                + per_frame.cluster_indirect_args.size()
+                + per_frame.indirect_draw_args.size()) as usize
         } else {
-            8
+            0
         };
         total
     }

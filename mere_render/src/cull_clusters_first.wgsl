@@ -183,7 +183,7 @@ fn is_occluded(instance_id: u32, meshlet: Meshlet) -> bool {
         let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
         // Target a mip where the AABB is roughly 4x4 texels
-        var mip = max(firstLeadingBit(max_size) + 1, 2) - 2;
+        var mip = max(0, firstLeadingBit(max_size) - 3);
 
         // Check if the AABB spans more than 4 texels at this mip
         if any((max_texel >> vec2(mip)) > ((min_texel >> vec2(mip)) + 3)) {

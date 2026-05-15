@@ -50,8 +50,9 @@ struct ClusterInfo {
 @group(1) @binding(3) var<storage, read> meshlets: array<Meshlet>;
 @group(1) @binding(4) var<storage, read> instances: array<MeshUniform>;
 @group(1) @binding(5) var<storage, read> cluster_info: array<ClusterInfo>;
+@group(1) @binding(6) var<storage, read> raster_count: u32;
 
-@group(1) @binding(6) var visibility_buffer: texture_storage_2d<r64uint, atomic>;
+@group(1) @binding(7) var visibility_buffer: texture_storage_2d<r64uint, atomic>;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -63,7 +64,7 @@ fn vs_main(
     @builtin(vertex_index) index_id: u32,
     @builtin(instance_index) cluster_id: u32,
 ) -> VertexOutput {
-    let info = cluster_info[cluster_id];
+    let info = cluster_info[raster_count + cluster_id];
     let instance_id = info.instance_id;
     let meshlet_id = info.meshlet_id;
 
