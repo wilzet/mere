@@ -17,7 +17,7 @@ mod egui_debugger;
 mod pipeline;
 mod renderer;
 
-pub const CLUSTER_SLOTS: u32 = 1 << 25;
+pub const CLUSTER_SLOTS: u32 = 1 << 23;
 
 #[derive(PartialEq, Clone, Copy, Default, Debug)]
 pub enum DebugMode {
@@ -99,8 +99,8 @@ impl State {
 
         let mut rng = rand::rng();
 
-        for _ in 0..100000 {
-            // Generate random position within 0.0 to 500.0 for each axis
+        for _ in 0..5000 {
+            // Generate random position within 0.0 to 100.0 for each axis
             let x = rng.random_range(0.0..100.0);
             let y = rng.random_range(0.0..100.0);
             let z = rng.random_range(0.0..100.0);
@@ -265,14 +265,8 @@ impl State {
         self.world.process_asset_event();
 
         let (device, queue) = self.mere_renderer.get_device_queue();
-        let config = self.mere_renderer.get_config();
-        self.world.prepare_meshlet_resources(
-            device,
-            queue,
-            config,
-            !self.lock_view,
-            &mut self.profiler,
-        );
+        self.world
+            .prepare_meshlet_resources(device, queue, !self.lock_view, &mut self.profiler);
 
         self.camera_controller
             .update_camera(self.world.main_camera_mut(), dt);

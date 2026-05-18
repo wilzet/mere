@@ -254,7 +254,6 @@ impl World {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        config: &wgpu::SurfaceConfiguration,
         update_view: bool,
         profiler: &mut Profiler,
     ) {
@@ -282,7 +281,7 @@ impl World {
             .update_render_view(queue, &self.cameras[0], update_view);
 
         self.resources
-            .generate_frame_resources(device, config, &self.meshlets, &self.instances);
+            .generate_frame_resources(device, &self.meshlets, &self.instances);
 
         profiler.end();
     }

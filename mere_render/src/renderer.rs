@@ -235,6 +235,7 @@ impl Renderer {
             true,
             encoder,
             per_frame_resources,
+            &resources.dummy_render_target,
             instance_count,
             instance_cull_first_pipeline,
             cluster_cull_first_pipeline,
@@ -253,6 +254,7 @@ impl Renderer {
             false,
             encoder,
             per_frame_resources,
+            &resources.dummy_render_target,
             instance_count,
             instance_cull_second_pipeline,
             cluster_cull_second_pipeline,
@@ -356,6 +358,7 @@ fn cull_pass(
     first: bool,
     encoder: &mut wgpu::CommandEncoder,
     per_frame_resources: &PerFrameResources,
+    render_target: &wgpu::TextureView,
     instance_count: u32,
     instance_cull_pipeline: &wgpu::ComputePipeline,
     cluster_cull_pipeline: &wgpu::ComputePipeline,
@@ -403,7 +406,10 @@ fn cull_pass(
             let (x, y) = if instance_count <= MAX_WORKGROUP_DIM {
                 (instance_count, 1)
             } else {
-                (MAX_WORKGROUP_DIM, instance_count.div_ceil(MAX_WORKGROUP_DIM))
+                (
+                    MAX_WORKGROUP_DIM,
+                    instance_count.div_ceil(MAX_WORKGROUP_DIM),
+                )
             };
 
             instance_cull_pass.dispatch_workgroups(x, y, 1);
@@ -467,7 +473,7 @@ fn cull_pass(
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(name),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &per_frame_resources.dummy_render_target,
+                view: render_target,
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {

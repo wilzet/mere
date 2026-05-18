@@ -18,7 +18,6 @@ pub struct MeshletBindGroups {
 
 #[derive(Clone, Debug)]
 pub struct PerFrameResources {
-    pub dummy_render_target: wgpu::TextureView,
     pub instance_second_indirect_args: wgpu::Buffer,
     pub cluster_indirect_args: wgpu::Buffer,
     pub indirect_draw_args: wgpu::Buffer,

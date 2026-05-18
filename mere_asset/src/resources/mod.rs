@@ -23,6 +23,7 @@ pub struct ResourceStorage {
     second_pass_instance_candidates: Option<wgpu::Buffer>,
 
     pub visibility_buffer: wgpu::Texture,
+    pub dummy_render_target: wgpu::TextureView,
     pub material_depth: Texture,
     pub current_depth_pyramid: DepthPyramid,
     pub previous_depth_pyramid: DepthPyramid,
@@ -50,24 +51,22 @@ impl ResourceStorage {
         config: &wgpu::SurfaceConfiguration,
         main_camera: &Camera,
     ) -> Self {
-        let visibility_buffer = {
-            let size = wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            };
-
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("visibility_buffer"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R64Uint,
-                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
-                view_formats: &[],
-            })
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
         };
+
+        let visibility_buffer = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("visibility_buffer"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R64Uint,
+            usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        });
 
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
@@ -113,6 +112,18 @@ impl ResourceStorage {
                 &visibility_buffer.create_view(&wgpu::TextureViewDescriptor::default()),
             ),
             visibility_buffer,
+            dummy_render_target: device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("dummy_render_target"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Uint,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default()),
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
             visibility_buffer_clear_bind_group_layout: device.create_bind_group_layout(
@@ -319,31 +330,11 @@ impl ResourceStorage {
     pub fn generate_frame_resources(
         &mut self,
         device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
         meshlets: &MeshletStorage,
         instances: &InstanceStorage,
     ) {
-        let size = wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        };
-
         let visibility_buffer = self
             .visibility_buffer
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let dummy_render_target = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("dummy_render_target"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Uint,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            })
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let visible_instance_cluster_count =
@@ -725,7 +716,6 @@ impl ResourceStorage {
         };
 
         self.meshlet_per_frame_resources = Some(PerFrameResources {
-            dummy_render_target,
             instance_second_indirect_args,
             cluster_indirect_args,
             indirect_draw_args,
@@ -746,24 +736,35 @@ impl ResourceStorage {
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
-        self.visibility_buffer = {
-            let size = wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            };
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
 
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("visibility_buffer"),
+        self.visibility_buffer = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("visibility_buffer"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R64Uint,
+            usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+            view_formats: &[],
+        });
+
+        self.dummy_render_target = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("dummy_render_target"),
                 size,
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R64Uint,
-                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                format: wgpu::TextureFormat::R8Uint,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             })
-        };
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         self.material_depth =
             Texture::create_depth_texture(device, config, "material_depth_texture", true);
@@ -811,6 +812,9 @@ impl ResourceStorage {
         total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height)
             as usize
             * size_of::<u64>();
+        total += (self.dummy_render_target.texture().width()
+            * self.dummy_render_target.texture().height()) as usize
+            * size_of::<u8>();
         total += self.material_depth.size_in_bytes();
         total += self.current_depth_pyramid.depth_pyramid.size_in_bytes();
         total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
