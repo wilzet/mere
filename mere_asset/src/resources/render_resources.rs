@@ -13,7 +13,6 @@ pub struct MeshletBindGroups {
     pub meshlet_read_attributes_bind_group: wgpu::BindGroup,
     pub main_render_view_bind_group: wgpu::BindGroup,
     pub culling_render_view_bind_group: wgpu::BindGroup,
-    pub downsample_depth_bind_group: wgpu::BindGroup,
     pub resolve_material_depth_bind_group: wgpu::BindGroup,
 }
 

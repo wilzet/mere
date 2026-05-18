@@ -542,7 +542,7 @@ fn draw_depth_pyramid_section(
     device: &wgpu::Device,
     renderer: &mut egui_wgpu::Renderer,
 ) {
-    let dp = &world.resources().depth_pyramid;
+    let dp = &world.resources().current_depth_pyramid;
     let (width, height) = dp.virtual_size();
 
     let root_id = ui.id().with("depth_pyramid");

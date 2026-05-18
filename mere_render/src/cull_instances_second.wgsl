@@ -149,7 +149,7 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
         let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
         // Target a mip where the AABB is roughly 4x4 texels
-        var mip = max(0, firstLeadingBit(max_size) - 3);
+        var mip = max(2, firstLeadingBit(max_size + 1)) - 2;
 
         // Check if the AABB spans more than 4 texels at this mip
         if any((max_texel >> vec2(mip)) > ((min_texel >> vec2(mip)) + 3)) {
@@ -179,7 +179,9 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
 var<workgroup> shared_cluster_base: u32;
 var<workgroup> visible: bool;
 
-@compute @workgroup_size(1024, 1, 1)
+const BLOCK_SIZE: u32 = 256;
+
+@compute @workgroup_size(BLOCK_SIZE, 1, 1)
 fn cull_instances(
     @builtin(workgroup_id) block_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
@@ -206,7 +208,7 @@ fn cull_instances(
         let cluster_base = shared_cluster_base;
         let meshlet_base = instance_meshlet_offsets[instance_id];
 
-        for (var i = local_id.x; i < meshlet_count; i += 1024u) {
+        for (var i = local_id.x; i < meshlet_count; i += BLOCK_SIZE) {
             let cluster_id = cluster_base + i;
             let meshlet_id = meshlet_base + i;
 

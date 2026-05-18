@@ -17,7 +17,7 @@ mod egui_debugger;
 mod pipeline;
 mod renderer;
 
-pub const CLUSTER_SLOTS: u32 = 1 << 20;
+pub const CLUSTER_SLOTS: u32 = 1 << 24;
 
 #[derive(PartialEq, Clone, Copy, Default, Debug)]
 pub enum DebugMode {
@@ -99,7 +99,7 @@ impl State {
 
         let mut rng = rand::rng();
 
-        for _ in 0..64000 {
+        for _ in 0..1000 {
             // Generate random position within 0.0 to 500.0 for each axis
             let x = rng.random_range(0.0..200.0);
             let y = rng.random_range(0.0..200.0);
@@ -290,7 +290,7 @@ impl State {
         self.mere_renderer.render(
             &view,
             &mut encoder,
-            self.world.instances(),
+            self.world.instances().scene_instance_count,
             self.world.resources(),
             &materials,
             &mut self.profiler,
@@ -327,6 +327,7 @@ impl State {
     }
 
     pub fn after_render(&mut self) {
+        self.world.after_render();
         self.profiler.finish_frame();
     }
 }

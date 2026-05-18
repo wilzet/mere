@@ -10,6 +10,8 @@ use wgpu::util::DeviceExt;
 mod depth_pyramid;
 mod render_resources;
 
+pub use render_resources::PerFrameResources;
+
 #[derive(Clone, Debug)]
 pub struct ResourceStorage {
     pub cluster_info: wgpu::Buffer,
@@ -22,7 +24,8 @@ pub struct ResourceStorage {
 
     pub visibility_buffer: wgpu::Texture,
     pub material_depth: Texture,
-    pub depth_pyramid: DepthPyramid,
+    pub current_depth_pyramid: DepthPyramid,
+    pub previous_depth_pyramid: DepthPyramid,
     pub meshlet_per_frame_resources: Option<PerFrameResources>,
 
     pub rightmost_slot: u32,
@@ -47,6 +50,25 @@ impl ResourceStorage {
         config: &wgpu::SurfaceConfiguration,
         main_camera: &Camera,
     ) -> Self {
+        let visibility_buffer = {
+            let size = wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            };
+
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("visibility_buffer"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R64Uint,
+                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+        };
+
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("meshlet_cluster_info"),
@@ -74,32 +96,23 @@ impl ResourceStorage {
             }),
             render_view: RenderView::new(main_camera),
             second_pass_instance_candidates: None,
-            visibility_buffer: {
-                let size = wgpu::Extent3d {
-                    width: config.width,
-                    height: config.height,
-                    depth_or_array_layers: 1,
-                };
-
-                device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("visibility_buffer"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::R64Uint,
-                    usage: wgpu::TextureUsages::STORAGE_ATOMIC
-                        | wgpu::TextureUsages::STORAGE_BINDING,
-                    view_formats: &[],
-                })
-            },
             material_depth: Texture::create_depth_texture(
                 device,
                 config,
                 "material_depth_texture",
                 true,
             ),
-            depth_pyramid: DepthPyramid::new(device, "depth_pyramid", config.width, config.height),
+            previous_depth_pyramid: DepthPyramid::new(
+                device,
+                "previous_depth_pyramid",
+                &visibility_buffer.create_view(&wgpu::TextureViewDescriptor::default()),
+            ),
+            current_depth_pyramid: DepthPyramid::new(
+                device,
+                "current_depth_pyramid",
+                &visibility_buffer.create_view(&wgpu::TextureViewDescriptor::default()),
+            ),
+            visibility_buffer,
             meshlet_per_frame_resources: None,
             rightmost_slot: cluster_slots - 1,
             visibility_buffer_clear_bind_group_layout: device.create_bind_group_layout(
@@ -418,7 +431,9 @@ impl ResourceStorage {
                         binding: 3,
                         resource: instances.instance_meshlet_counts.binding().unwrap(),
                     },
-                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    self.previous_depth_pyramid
+                        .depth_pyramid
+                        .bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: self.cluster_info.as_entire_binding(),
@@ -461,7 +476,9 @@ impl ResourceStorage {
                         binding: 3,
                         resource: instances.instance_meshlet_counts.binding().unwrap(),
                     },
-                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    self.current_depth_pyramid
+                        .depth_pyramid
+                        .bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: self.cluster_info.as_entire_binding(),
@@ -500,7 +517,9 @@ impl ResourceStorage {
                         binding: 3,
                         resource: visible_instance_cluster_count.as_entire_binding(),
                     },
-                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    self.previous_depth_pyramid
+                        .depth_pyramid
+                        .bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: self.visible_cluster_info.as_entire_binding(),
@@ -531,7 +550,9 @@ impl ResourceStorage {
                         binding: 3,
                         resource: visible_instance_cluster_count.as_entire_binding(),
                     },
-                    self.depth_pyramid.depth_pyramid.bind_group_entry_view(4),
+                    self.current_depth_pyramid
+                        .depth_pyramid
+                        .bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: self.visible_cluster_info.as_entire_binding(),
@@ -664,91 +685,6 @@ impl ResourceStorage {
                     resource: self.culling_render_view.as_entire_binding(),
                 }],
             }),
-            downsample_depth_bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("downsample_depth_bind_group"),
-                layout: &self.depth_pyramid.downsample_depth_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&visibility_buffer),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[0],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[1],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[2],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[3],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[4],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[5],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[6],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[7],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[8],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[9],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[10],
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.depth_pyramid.depth_pyramid_mips[11],
-                        ),
-                    },
-                    self.depth_pyramid
-                        .depth_pyramid
-                        .bind_group_entry_sampler(13),
-                ],
-            }),
             resolve_material_depth_bind_group: device.create_bind_group(
                 &wgpu::BindGroupDescriptor {
                     label: Some("resolve_material_depth_bind_group"),
@@ -815,12 +751,28 @@ impl ResourceStorage {
         self.material_depth =
             Texture::create_depth_texture(device, config, "material_depth_texture", true);
 
-        self.depth_pyramid = DepthPyramid::new(
+        self.current_depth_pyramid = DepthPyramid::new(
             device,
-            &self.depth_pyramid.depth_pyramid.label,
-            config.width,
-            config.height,
-        )
+            &self.current_depth_pyramid.depth_pyramid.label,
+            &self
+                .visibility_buffer
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+        );
+
+        self.previous_depth_pyramid = DepthPyramid::new(
+            device,
+            &self.previous_depth_pyramid.depth_pyramid.label,
+            &self
+                .visibility_buffer
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+        );
+    }
+
+    pub fn after_render(&mut self) {
+        std::mem::swap(
+            &mut self.current_depth_pyramid,
+            &mut self.previous_depth_pyramid,
+        );
     }
 
     pub fn report_memory_host(&self) -> usize {
@@ -843,7 +795,7 @@ impl ResourceStorage {
             as usize
             * size_of::<u64>();
         total += self.material_depth.size_in_bytes();
-        total += self.depth_pyramid.depth_pyramid.size_in_bytes();
+        total += self.current_depth_pyramid.depth_pyramid.size_in_bytes();
         total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
             (per_frame.instance_second_indirect_args.size()
                 + per_frame.cluster_indirect_args.size()

@@ -22,7 +22,7 @@ pub use {
     camera::Camera,
     instance_storage::{Instance, InstanceStorage},
     material::{Material, MaterialData},
-    resources::ResourceStorage,
+    resources::{PerFrameResources, ResourceStorage},
     texture::Texture,
     world::World,
 };

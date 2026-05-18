@@ -1,5 +1,5 @@
 use crate::{
-    resources::render_resources::{Layout, PerFrameResources, entry, storage_texture},
+    resources::render_resources::{Layout, entry, storage_texture},
     texture::{Texture, TextureOptions},
 };
 use mere_log::Profiler;
@@ -12,12 +12,14 @@ pub struct DepthPyramid {
     pub depth_pyramid_mips: [wgpu::TextureView; DEPTH_PYRAMID_COUNT],
     pub downsample_depth_first_pipeline: wgpu::ComputePipeline,
     pub downsample_depth_second_pipeline: wgpu::ComputePipeline,
-    pub downsample_depth_bind_group_layout: wgpu::BindGroupLayout,
+    pub downsample_depth_bind_group: wgpu::BindGroup,
     pub mip_count: u32,
 }
 
 impl DepthPyramid {
-    pub fn new(device: &wgpu::Device, label: &str, width: u32, height: u32) -> Self {
+    pub fn new(device: &wgpu::Device, label: &str, source: &wgpu::TextureView) -> Self {
+        let width = source.texture().width();
+        let height = source.texture().height();
         let size = wgpu::Extent3d {
             width: (width + 1).next_power_of_two() / 2,
             height: (height + 1).next_power_of_two() / 2,
@@ -85,7 +87,7 @@ impl DepthPyramid {
             }
         });
 
-        let downsample_depth_bind_group_layout = device.create_bind_group_layout(
+        let downsample_depth_bind_group_layout = &device.create_bind_group_layout(
             &Layout::sequential(
                 Some("downsample_depth_bind_group_layout"),
                 wgpu::ShaderStages::COMPUTE,
@@ -150,9 +152,69 @@ impl DepthPyramid {
             .get(),
         );
 
+        let downsample_depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("downsample_depth_bind_group"),
+            layout: downsample_depth_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[1]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[2]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[3]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[4]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[5]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[6]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[7]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[8]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[9]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[10]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&depth_pyramid_mips[11]),
+                },
+                depth_pyramid.bind_group_entry_sampler(13),
+            ],
+        });
+
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("downsample_depth_pipeline_layout"),
-            bind_group_layouts: &[Some(&downsample_depth_bind_group_layout)],
+            bind_group_layouts: &[Some(downsample_depth_bind_group_layout)],
             immediate_size: 4,
         });
 
@@ -177,7 +239,7 @@ impl DepthPyramid {
             depth_pyramid_mips,
             downsample_depth_first_pipeline,
             downsample_depth_second_pipeline,
-            downsample_depth_bind_group_layout,
+            downsample_depth_bind_group,
             mip_count,
         }
     }
@@ -190,12 +252,7 @@ impl DepthPyramid {
         (virtual_view_size_x, virtual_view_size_y)
     }
 
-    pub fn downsample(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &PerFrameResources,
-        profiler: &mut Profiler,
-    ) {
+    pub fn downsample(&self, encoder: &mut wgpu::CommandEncoder, profiler: &mut Profiler) {
         let timestamp_writes = profiler.begin("depth_pyramid_downsample");
 
         let mut downsample_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -203,7 +260,7 @@ impl DepthPyramid {
             timestamp_writes,
         });
         downsample_pass.set_pipeline(&self.downsample_depth_first_pipeline);
-        downsample_pass.set_bind_group(0, &resources.bind_groups.downsample_depth_bind_group, &[]);
+        downsample_pass.set_bind_group(0, &self.downsample_depth_bind_group, &[]);
         downsample_pass.set_immediates(0, &self.mip_count.to_le_bytes());
 
         let (width, height) = self.virtual_size();
