@@ -20,6 +20,7 @@ struct DrawIndirectArgs {
 @workgroup_size(1, 1, 1)
 fn fill_counts() {
     cluster_indirect_args.x = 0;
+    cluster_indirect_args.y = 1;
     visible_instance_cluster_count = 0;
 
     previous_raster_counts += raster_indirect_args.instance_count;

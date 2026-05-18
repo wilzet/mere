@@ -243,7 +243,9 @@ impl Renderer {
         );
 
         if !lock_view {
-            resources.current_depth_pyramid.downsample(encoder, profiler);
+            resources
+                .current_depth_pyramid
+                .downsample(encoder, profiler);
         }
 
         cull_pass(
@@ -259,7 +261,9 @@ impl Renderer {
         );
 
         if !lock_view {
-            resources.current_depth_pyramid.downsample(encoder, profiler);
+            resources
+                .current_depth_pyramid
+                .downsample(encoder, profiler);
         }
 
         {
@@ -392,7 +396,16 @@ fn cull_pass(
         );
 
         if first {
-            instance_cull_pass.dispatch_workgroups(instance_count, 1, 1);
+            instance_cull_pass.set_immediates(0, &instance_count.to_le_bytes());
+
+            const MAX_WORKGROUP_DIM: u32 = 65535;
+            let (x, y) = if instance_count <= MAX_WORKGROUP_DIM {
+                (instance_count, 1)
+            } else {
+                (MAX_WORKGROUP_DIM, instance_count.div_ceil(MAX_WORKGROUP_DIM))
+            };
+
+            instance_cull_pass.dispatch_workgroups(x, y, 1);
         } else {
             instance_cull_pass.dispatch_workgroups_indirect(
                 &per_frame_resources.instance_second_indirect_args,

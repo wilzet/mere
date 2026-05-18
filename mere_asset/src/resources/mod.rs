@@ -145,6 +145,7 @@ impl ResourceStorage {
                         storage_buffer(false),
                         storage_buffer(false),
                         storage_buffer(false),
+                        storage_buffer(false),
                     ],
                 )
                 .get(),
@@ -166,6 +167,7 @@ impl ResourceStorage {
                         storage_buffer(false),
                         storage_buffer(false),
                         storage_buffer(false),
+                        storage_buffer(true),
                         storage_buffer(true),
                     ],
                 )
@@ -373,6 +375,13 @@ impl ResourceStorage {
             }
         };
 
+        let second_pass_instance_count =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("second_pass_instance_count"),
+                contents: bytemuck::bytes_of(&0u32),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
         let instance_second_indirect_args =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("second_instance_indirect_args"),
@@ -452,6 +461,10 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 9,
+                        resource: second_pass_instance_count.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
                         resource: instance_second_indirect_args.as_entire_binding(),
                     },
                 ],
@@ -494,6 +507,10 @@ impl ResourceStorage {
                     wgpu::BindGroupEntry {
                         binding: 8,
                         resource: second_pass_instance_candidates.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: second_pass_instance_count.as_entire_binding(),
                     },
                 ],
             }),

@@ -99,7 +99,7 @@ impl State {
 
         let mut rng = rand::rng();
 
-        for _ in 0..1000 {
+        for _ in 0..100000 {
             // Generate random position within 0.0 to 500.0 for each axis
             let x = rng.random_range(0.0..200.0);
             let y = rng.random_range(0.0..200.0);

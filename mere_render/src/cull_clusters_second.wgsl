@@ -152,6 +152,10 @@ fn is_occluded(instance_id: u32, meshlet: Meshlet) -> bool {
         let max_texel = vec2<u32>(min(aabb_max_px, hzb_size - 1.0));
         let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
+        if max_size == 0 {
+            return true;
+        }
+
         // Target a mip where the AABB is roughly 4x4 texels
         var mip = max(2, firstLeadingBit(max_size + 1)) - 2;
 
@@ -180,11 +184,14 @@ fn is_occluded(instance_id: u32, meshlet: Meshlet) -> bool {
     return false;
 }
 
-@compute @workgroup_size(128, 1, 1)
+const BLOCK_SIZE: u32 = 128;
+const MAX_WORKGROUP_DIM: u32 = 65535;
+
+@compute @workgroup_size(BLOCK_SIZE, 1, 1)
 fn cull_clusters(
     @builtin(global_invocation_id) global_id: vec3<u32>
 ) {
-    let cluster_id = global_id.x;
+    let cluster_id = global_id.y * MAX_WORKGROUP_DIM * BLOCK_SIZE + global_id.x;
 
     if cluster_id >= visible_instance_cluster_count { return; }
 

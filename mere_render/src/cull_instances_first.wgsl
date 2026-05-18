@@ -30,7 +30,7 @@ struct ClusterInfo {
 
 struct DispatchIndirectArgs {
     x: atomic<u32>,
-    y: u32,
+    y: atomic<u32>,
     z: u32,
 }
 
@@ -46,7 +46,8 @@ struct DispatchIndirectArgs {
 @group(0) @binding(7) var<storage, read_write> cluster_indirect_args: DispatchIndirectArgs;
 
 @group(0) @binding(8) var<storage, read_write> second_pass_candidates: array<u32>;
-@group(0) @binding(9) var<storage, read_write> second_pass_indirect_args: DispatchIndirectArgs;
+@group(0) @binding(9) var<storage, read_write> second_pass_candidates_count: atomic<u32>;
+@group(0) @binding(10) var<storage, read_write> second_pass_indirect_args: DispatchIndirectArgs;
 
 @group(1) @binding(0) var<uniform> render_view: RenderView;
 
@@ -181,6 +182,10 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
         let max_texel = vec2<u32>(min(aabb_max_px, hzb_size - 1.0));
         let max_size = max(max_texel.x - min_texel.x, max_texel.y - min_texel.y);
 
+        if max_size == 0 {
+            return true;
+        }
+
         // Target a mip where the AABB is roughly 4x4 texels
         var mip = max(2, firstLeadingBit(max_size + 1)) - 2;
 
@@ -209,17 +214,30 @@ fn is_occluded(instance_id: u32, local_aabb: Aabb) -> bool {
     return false;
 }
 
+struct Constants {
+    instance_count: u32,
+}
+
+var<immediate> constants: Constants;
+
 var<workgroup> shared_cluster_base: u32;
 var<workgroup> visible: bool;
 
 const BLOCK_SIZE: u32 = 256;
+const CLUSTER_BLOCK_SIZE: u32 = 128;
+const MAX_WORKGROUP_DIM: u32 = 65535;
 
 @compute @workgroup_size(BLOCK_SIZE, 1, 1)
 fn cull_instances(
     @builtin(workgroup_id) block_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let instance_id = block_id.x;
+    let instance_id = block_id.y * MAX_WORKGROUP_DIM + block_id.x;
+
+    if instance_id >= constants.instance_count {
+        return;
+    }
+
     let meshlet_count = instance_meshlet_counts[instance_id];
 
     if local_id.x == 0 {
@@ -231,6 +249,7 @@ fn cull_instances(
         visible = !outside_frustum && !occluded;
 
         if !outside_frustum && occluded {
+            atomicAdd(&second_pass_candidates_count, 1);
             let id = atomicAdd(&second_pass_indirect_args.x, 1);
             second_pass_candidates[id] = instance_id;
         }
@@ -238,8 +257,15 @@ fn cull_instances(
         if visible {
             shared_cluster_base = atomicAdd(&visible_instance_cluster_count, meshlet_count);
 
-            let required_workgroups = (shared_cluster_base + meshlet_count + 127) / 128;
-            atomicMax(&cluster_indirect_args.x, required_workgroups);
+            let required_workgroups = (shared_cluster_base + meshlet_count + CLUSTER_BLOCK_SIZE - 1) / CLUSTER_BLOCK_SIZE;
+            if required_workgroups <= MAX_WORKGROUP_DIM {
+                atomicMax(&cluster_indirect_args.x, required_workgroups);
+            } else {
+                atomicMax(&cluster_indirect_args.x, MAX_WORKGROUP_DIM);
+
+                let required_y = (required_workgroups + MAX_WORKGROUP_DIM - 1) / MAX_WORKGROUP_DIM;
+                atomicMax(&cluster_indirect_args.y, required_y);
+            }
         }
     }
 

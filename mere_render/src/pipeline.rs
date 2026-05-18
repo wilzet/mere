@@ -39,7 +39,7 @@ impl Pipelines {
                     Some(&world.resources().instance_cull_first_bind_group_layout),
                     Some(&world.resources().render_view_bind_group_layout),
                 ],
-                immediate_size: 0,
+                immediate_size: 4,
             });
 
             create_compute_pipeline(
