@@ -59,6 +59,7 @@ impl Renderer {
                     max_storage_textures_per_shader_stage: 16,
                     max_storage_buffers_per_shader_stage: 16,
                     max_immediate_size: 8,
+                    max_storage_buffer_binding_size: 512 * 1024 * 1024,
                     ..Default::default()
                 },
                 memory_hints: Default::default(),

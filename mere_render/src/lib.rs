@@ -17,7 +17,7 @@ mod egui_debugger;
 mod pipeline;
 mod renderer;
 
-pub const CLUSTER_SLOTS: u32 = 1 << 24;
+pub const CLUSTER_SLOTS: u32 = 1 << 25;
 
 #[derive(PartialEq, Clone, Copy, Default, Debug)]
 pub enum DebugMode {
@@ -101,9 +101,9 @@ impl State {
 
         for _ in 0..100000 {
             // Generate random position within 0.0 to 500.0 for each axis
-            let x = rng.random_range(0.0..200.0);
-            let y = rng.random_range(0.0..200.0);
-            let z = rng.random_range(0.0..200.0);
+            let x = rng.random_range(0.0..100.0);
+            let y = rng.random_range(0.0..100.0);
+            let z = rng.random_range(0.0..100.0);
 
             // Generate a completely random rotation (Quaternion)
             let rotation = Quat::from_euler(

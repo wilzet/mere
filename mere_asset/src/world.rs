@@ -270,17 +270,7 @@ impl World {
 
         profiler.begin_cpu("write_instance_buffers");
 
-        self.instances.instance_uniforms.write_buffer(device, queue);
-        self.instances.instance_aabbs.write_buffer(device, queue);
-        self.instances
-            .instance_meshlet_offsets
-            .write_buffer(device, queue);
-        self.instances
-            .instance_meshlet_counts
-            .write_buffer(device, queue);
-        self.instances
-            .instance_material_ids
-            .write_buffer(device, queue);
+        self.instances.write_instance_buffers(device, queue);
 
         profiler.end();
 

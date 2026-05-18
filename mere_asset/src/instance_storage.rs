@@ -20,6 +20,7 @@ pub struct InstanceStorage {
     pub instance_meshlet_counts: GpuStorageBuffer<Vec<u32>>,
     pub instance_material_ids: GpuStorageBuffer<Vec<u32>>,
     pub materials_in_scene: HashSet<ResourceHandle<Material>>,
+    dirty: bool,
 }
 
 impl InstanceStorage {
@@ -42,6 +43,7 @@ impl InstanceStorage {
                 Vec::new(),
             ),
             materials_in_scene: HashSet::new(),
+            dirty: true,
         }
     }
 
@@ -58,10 +60,12 @@ impl InstanceStorage {
     }
 
     pub fn get_mut(&mut self, handle: InstanceHandle) -> Option<&mut Instance> {
+        self.dirty = true;
         self.instances.get_mut(handle)
     }
 
     pub fn add_instance(&mut self, instance: Instance) -> InstanceHandle {
+        self.dirty = true;
         self.materials_in_scene.insert(instance.material);
         self.instances.insert(instance)
     }
@@ -73,6 +77,10 @@ impl InstanceStorage {
     }
 
     pub fn build_instance_buffers(&mut self) {
+        if !self.dirty {
+            return;
+        }
+
         self.reset();
 
         for (_, instance) in self.instances.iter() {
@@ -92,6 +100,20 @@ impl InstanceStorage {
         }
 
         self.scene_instance_count = self.instances.len() as u32;
+    }
+
+    pub fn write_instance_buffers(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if !self.dirty {
+            return;
+        }
+
+        self.instance_uniforms.write_buffer(device, queue);
+        self.instance_aabbs.write_buffer(device, queue);
+        self.instance_meshlet_offsets.write_buffer(device, queue);
+        self.instance_meshlet_counts.write_buffer(device, queue);
+        self.instance_material_ids.write_buffer(device, queue);
+
+        self.dirty = false;
     }
 
     fn reset(&mut self) {
