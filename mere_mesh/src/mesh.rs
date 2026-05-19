@@ -1,5 +1,5 @@
 use crate::{
-    meshlet::{Meshlet, generate_meshlets},
+    meshlet::{Meshlet, MeshletLod, generate_meshlets},
     util::*,
     vertex::{FullVertex, Vertex, VertexAttributes, split_full_vertex},
 };
@@ -30,8 +30,11 @@ impl MeshletMesh {
 
         let aabb = Aabb::from_vertices(&vertex_positions);
 
-        let (meshlet_vertex_indices, meshlet_indices, meshlets) =
-            generate_meshlets(&vertex_positions, &indices, None);
+        let MeshletLod {
+            vertices: meshlet_vertex_indices,
+            indices: meshlet_indices,
+            meshlets,
+        } = generate_meshlets(&vertex_positions, &indices, None);
 
         Self {
             name: "".to_string(),

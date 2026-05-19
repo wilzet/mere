@@ -25,6 +25,17 @@ impl Meshlet {
     pub const FILL_WEIGHT: f32 = 1.0;
 }
 
+#[derive(Clone, Default, Debug)]
+pub struct MeshletLod {
+    pub vertices: Vec<u32>,
+    pub indices: Vec<u8>,
+    pub meshlets: Vec<Meshlet>,
+}
+
+impl MeshletLod {
+    pub const TARGET_GROUP_SIZE: usize = 4;
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BoundingSphere {
@@ -65,9 +76,9 @@ pub fn generate_meshlets(
     vertices: &[Vertex],
     indices: &[u32],
     parent_lod: Option<(BoundingSphere, f32)>,
-) -> (Vec<u32>, Vec<u8>, Vec<Meshlet>) {
+) -> MeshletLod {
     if indices.is_empty() || indices.len() % 3 != 0 {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return MeshletLod::default();
     }
 
     let triangle_count = indices.len() / 3;
@@ -232,5 +243,9 @@ pub fn generate_meshlets(
         }
     }
 
-    (meshlet_vertices, meshlet_indices, meshlets)
+    MeshletLod {
+        vertices: meshlet_vertices,
+        indices: meshlet_indices,
+        meshlets,
+    }
 }
