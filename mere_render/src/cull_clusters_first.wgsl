@@ -8,7 +8,10 @@ struct RenderView {
 }
 
 struct BoundingSphere {
-    center_radius: vec4<f32>,
+    center_x: f32,
+    center_y: f32,
+    center_z: f32,
+    radius: f32,
 }
 
 struct Meshlet {
@@ -17,7 +20,8 @@ struct Meshlet {
     index_offset: u32,
     index_count: u32,
     bounds: BoundingSphere,
-    parent_bounds: BoundingSphere,
+    parent_error: BoundingSphere,
+    error: f32,
 }
 
 struct MeshUniform {
@@ -62,14 +66,8 @@ fn is_outside_frustum(instance_id: u32, meshlet: Meshlet) -> bool {
         vec4(0.0, 0.0, 0.0, 1.0),
     ));
 
-    let center = (model_matrix * vec4(bounds.center_radius.xyz, 1.0)).xyz;
-
-    let scale = max(
-        length(m[0].xyz),
-        max(length(m[1].xyz), length(m[2].xyz))
-    );
-
-    let radius = bounds.center_radius.w * scale;
+    let center = (model_matrix * vec4(bounds.center_x, bounds.center_y, bounds.center_z, 1.0)).xyz;
+    let radius = bounds.radius;
 
     for (var i = 0u; i < 6u; i = i + 1u) {
         let plane = render_view.planes[i];
@@ -101,8 +99,8 @@ fn max8(p0: vec3<f32>, p1: vec3<f32>, p2: vec3<f32>, p3: vec3<f32>,
 }
 
 fn project_aabb(clip_from_local: mat4x4<f32>, near: f32, bounds: BoundingSphere, out: ptr<function, ScreenAabb>) -> bool {
-    let center = bounds.center_radius.xyz;
-    let half_extents = vec3(bounds.center_radius.w);
+    let center = vec3(bounds.center_x, bounds.center_y, bounds.center_z);
+    let half_extents = vec3(bounds.radius);
 
     let extents = half_extents * 2;
     let sx = clip_from_local * vec4<f32>(extents.x, 0.0, 0.0, 0.0);

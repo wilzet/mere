@@ -46,7 +46,8 @@ struct Meshlet {
     index_offset: u32,
     index_count: u32,
     bounds: BoundingSphere,
-    parent_bounds: BoundingSphere,
+    parent_error: BoundingSphere,
+    error: f32,
 }
 
 struct MeshUniform {

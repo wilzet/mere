@@ -1,11 +1,10 @@
 use crate::{
-    meshlet::{BoundingSphere, Meshlet},
+    meshlet::{Meshlet, generate_meshlets},
     util::*,
     vertex::{FullVertex, Vertex, VertexAttributes, split_full_vertex},
 };
 use mere_math::{Vec2, Vec3};
-use meshopt::VertexDataAdapter;
-use std::{fs, mem, path::Path, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 #[derive(Clone, Debug, Default)]
 pub struct MeshletMesh {
@@ -32,7 +31,7 @@ impl MeshletMesh {
         let aabb = Aabb::from_vertices(&vertex_positions);
 
         let (meshlet_vertex_indices, meshlet_indices, meshlets) =
-            Self::generate_meshlets(&vertex_positions, &indices);
+            generate_meshlets(&vertex_positions, &indices, None);
 
         Self {
             name: "".to_string(),
@@ -44,49 +43,6 @@ impl MeshletMesh {
             aabb,
             meshlet_offset: 0,
         }
-    }
-
-    fn generate_meshlets(
-        vertices: &[Vertex],
-        indices: &[u32],
-    ) -> (Vec<u32>, Vec<u8>, Vec<Meshlet>) {
-        let vertex_adapter = &Self::create_vertex_adapter(&vertices);
-        let meshlets = meshopt::build_meshlets_spatial(
-            &indices,
-            vertex_adapter,
-            Meshlet::MAX_VERTICES,
-            Meshlet::MIN_TRIANGLES,
-            Meshlet::MAX_TRIANGLES,
-            Meshlet::FILL_WEIGHT,
-        );
-
-        let bounds = meshlets.iter().map(|m| {
-            let bounds = meshopt::compute_meshlet_bounds(m, vertex_adapter);
-            BoundingSphere::new(bounds.center.into(), bounds.radius)
-        });
-
-        let mere_meshlets = meshlets
-            .meshlets
-            .iter()
-            .zip(bounds)
-            .map(|(meshlet, bounds)| Meshlet {
-                vertex_offset: meshlet.vertex_offset,
-                vertex_count: meshlet.vertex_count,
-                index_offset: meshlet.triangle_offset,
-                index_count: meshlet.triangle_count * 3,
-                bounds,
-                parent_bounds: BoundingSphere::new(bounds.center, f32::NEG_INFINITY),
-            })
-            .collect();
-
-        (meshlets.vertices, meshlets.triangles, mere_meshlets)
-    }
-
-    fn create_vertex_adapter(vertices: &[Vertex]) -> VertexDataAdapter<'_> {
-        let position_offset = mem::offset_of!(Vertex, position);
-        let vertex_stride = size_of::<Vertex>();
-        let vertex_data = meshopt::typed_to_bytes(vertices);
-        VertexDataAdapter::new(vertex_data, vertex_stride, position_offset).unwrap()
     }
 
     pub fn into_mere_file(&self) -> Vec<u8> {
