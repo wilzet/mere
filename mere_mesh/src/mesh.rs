@@ -1,7 +1,7 @@
 use crate::{
-    meshlet::{Meshlet, MeshletLod, generate_meshlets},
+    meshlet::{Meshlet, generate_meshlets},
     util::*,
-    vertex::{FullVertex, Vertex, VertexAttributes, split_full_vertex},
+    vertex::{FullVertex, Vertex, VertexAttributes, process_vertices, split_full_vertex},
 };
 use mere_math::{Vec2, Vec3};
 use std::{fs, path::Path, sync::Arc};
@@ -20,29 +20,19 @@ pub struct MeshletMesh {
 
 impl MeshletMesh {
     pub fn new(vertices: impl IntoIterator<Item = FullVertex>) -> Self {
-        let vertices = vertices.into_iter().collect::<Vec<_>>();
-        let (vertex_count, vertex_remap) = meshopt::generate_vertex_remap(&vertices, None);
-
-        let indices = meshopt::remap_index_buffer(None, vertices.len(), &vertex_remap);
-        let vertices = meshopt::remap_vertex_buffer(&vertices, vertex_count, &vertex_remap);
-
-        let (vertex_positions, vertex_attributes) = split_full_vertex(vertices);
+        let (vertex_positions, vertex_attributes, indices) = process_vertices(vertices);
 
         let aabb = Aabb::from_vertices(&vertex_positions);
 
-        let MeshletLod {
-            vertices: meshlet_vertex_indices,
-            indices: meshlet_indices,
-            meshlets,
-        } = generate_meshlets(&vertex_positions, &indices, None);
+        let lod_0 = generate_meshlets(&vertex_positions, &indices, None);
 
         Self {
             name: "".to_string(),
             vertex_positions: vertex_positions.into(),
             vertex_attributes: vertex_attributes.into(),
-            meshlet_vertex_indices: meshlet_vertex_indices.into(),
-            meshlet_indices: meshlet_indices.into(),
-            meshlets: meshlets.into(),
+            meshlet_vertex_indices: lod_0.vertex_indices.into(),
+            meshlet_indices: lod_0.indices.into(),
+            meshlets: lod_0.meshlets.into(),
             aabb,
             meshlet_offset: 0,
         }
@@ -62,7 +52,7 @@ impl MeshletMesh {
             .into_iter()
             .zip(self.vertex_attributes.into_iter())
             .map(|(&p, &a)| FullVertex {
-                position: p,
+                vertex: p,
                 attributes: a,
             })
             .collect::<Vec<_>>();
@@ -198,7 +188,7 @@ impl MeshletMesh {
         let vertices = indices.into_iter().map(|i| {
             let index = i as usize;
             FullVertex {
-                position: Vertex {
+                vertex: Vertex {
                     position: positions[index],
                 },
                 attributes: VertexAttributes {

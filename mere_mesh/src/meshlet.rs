@@ -27,7 +27,7 @@ impl Meshlet {
 
 #[derive(Clone, Default, Debug)]
 pub struct MeshletLod {
-    pub vertices: Vec<u32>,
+    pub vertex_indices: Vec<u32>,
     pub indices: Vec<u8>,
     pub meshlets: Vec<Meshlet>,
 }
@@ -83,26 +83,10 @@ pub fn generate_meshlets(
 
     let triangle_count = indices.len() / 3;
 
-    // Weld by position for stable topological adjacency.
-    let mut position_to_welded_id = HashMap::with_capacity(vertices.len());
-    let welded_vertex_remap = vertices
-        .iter()
-        .map(|vertex| {
-            let key = [
-                vertex.position.x.to_bits(),
-                vertex.position.y.to_bits(),
-                vertex.position.z.to_bits(),
-            ];
-
-            let next = position_to_welded_id.len() as u32;
-            *position_to_welded_id.entry(key).or_insert(next)
-        })
-        .collect::<Vec<_>>();
-
     // Vertex -> triangle adjacency.
-    let mut vertices_to_triangles = vec![Vec::new(); position_to_welded_id.len()];
+    let mut vertices_to_triangles = vec![Vec::new(); vertices.len()];
     for (i, &index) in indices.iter().enumerate() {
-        vertices_to_triangles[welded_vertex_remap[index as usize] as usize].push(i / 3);
+        vertices_to_triangles[index as usize].push(i / 3);
     }
 
     let triangle_centers = (0..triangle_count)
@@ -136,7 +120,7 @@ pub fn generate_meshlets(
         let spatial = 1.0 / (1.0 + dist);
 
         // Prefer compact + coplanar regions.
-        let weight = ((normal_similarity * 0.7 + spatial * 0.3) * 4096.0).clamp(1.0, 4096.0) as i32;
+        let weight = ((normal_similarity + spatial) * 2048.0).clamp(1.0, 4096.0) as i32;
 
         adjacency[a].push((b, weight));
         adjacency[b].push((a, weight));
@@ -244,7 +228,7 @@ pub fn generate_meshlets(
     }
 
     MeshletLod {
-        vertices: meshlet_vertices,
+        vertex_indices: meshlet_vertices,
         indices: meshlet_indices,
         meshlets,
     }
