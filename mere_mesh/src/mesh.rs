@@ -1,7 +1,7 @@
 use crate::{
-    meshlet::{Meshlet, generate_meshlets},
+    meshlet::{Meshlet, build_per_meshlet_attributes, generate_meshlets},
     util::*,
-    vertex::{FullVertex, Vertex, VertexAttributes, process_vertices, split_full_vertex},
+    vertex::{Vertex, VertexAttributes},
 };
 use mere_math::{Vec2, Vec3};
 use std::{fs, path::Path, sync::Arc};
@@ -19,20 +19,42 @@ pub struct MeshletMesh {
 }
 
 impl MeshletMesh {
-    pub fn new(vertices: impl IntoIterator<Item = FullVertex>) -> Self {
-        let (vertex_positions, vertex_attributes, indices) = process_vertices(vertices);
+    pub fn new(vertices: impl IntoIterator<Item = (Vertex, VertexAttributes)>) -> Self {
+        let (vertex_positions, vertex_attributes) =
+            vertices.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
         let aabb = Aabb::from_vertices(&vertex_positions);
 
-        let lod_0 = generate_meshlets(&vertex_positions, &indices, None);
+        let vertices = Vertex::create_vertex_adapter(&vertex_positions);
+        let vertex_positions_remap = meshopt::generate_position_remap(&vertices);
+        let indices = (0..vertex_positions.len() as u32).collect::<Vec<_>>();
+
+        let (meshlets, cull_data) =
+            generate_meshlets(&vertices, &indices, &vertex_positions_remap, None);
+        // let mut simplification_queue = (0..meshlets.len() as u32).collect::<Vec<_>>();
+
+        let mut meshlet_attributes = Vec::new();
+        let mut meshlet_meshlets = Vec::new();
+
+        for (i, (meshlet, &cull_data)) in meshlets.meshlets.iter().zip(cull_data.iter()).enumerate()
+        {
+            build_per_meshlet_attributes(
+                meshlet,
+                cull_data,
+                meshlets.get(i).vertices,
+                &vertex_attributes,
+                &mut meshlet_attributes,
+                &mut meshlet_meshlets,
+            );
+        }
 
         Self {
             name: "".to_string(),
             vertex_positions: vertex_positions.into(),
-            vertex_attributes: vertex_attributes.into(),
-            meshlet_vertex_indices: lod_0.vertex_indices.into(),
-            meshlet_indices: lod_0.indices.into(),
-            meshlets: lod_0.meshlets.into(),
+            vertex_attributes: meshlet_attributes.into(),
+            meshlet_vertex_indices: meshlets.vertices.into(),
+            meshlet_indices: meshlets.triangles.into(),
+            meshlets: meshlet_meshlets.into(),
             aabb,
             meshlet_offset: 0,
         }
@@ -43,23 +65,17 @@ impl MeshletMesh {
 
         // Write header
         bytes.extend_from_slice(&(self.vertex_positions.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.vertex_attributes.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlet_vertex_indices.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlet_indices.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&(self.meshlets.len() as u64).to_le_bytes());
 
-        let full_vertices = self
-            .vertex_positions
-            .into_iter()
-            .zip(self.vertex_attributes.into_iter())
-            .map(|(&p, &a)| FullVertex {
-                vertex: p,
-                attributes: a,
-            })
-            .collect::<Vec<_>>();
-
         // Write mesh data
-        let vertex_bytes = bytemuck::cast_slice(&full_vertices);
-        bytes.extend_from_slice(vertex_bytes);
+        let position_bytes = bytemuck::cast_slice(&self.vertex_positions);
+        bytes.extend_from_slice(position_bytes);
+
+        let attribute_bytes = bytemuck::cast_slice(&self.vertex_attributes);
+        bytes.extend_from_slice(attribute_bytes);
 
         let meshlet_vertex_index_bytes = bytemuck::cast_slice(&self.meshlet_vertex_indices);
         bytes.extend_from_slice(meshlet_vertex_index_bytes);
@@ -80,14 +96,16 @@ impl MeshletMesh {
 
         // Read Header
         let v_len = u64::from_le_bytes(bytes[0..8].try_into()?) as usize;
-        let m_v_i_len = u64::from_le_bytes(bytes[8..16].try_into()?) as usize;
-        let m_i_len = u64::from_le_bytes(bytes[16..24].try_into()?) as usize;
-        let m_len = u64::from_le_bytes(bytes[24..32].try_into()?) as usize;
-        let offset = 32;
+        let attr_len = u64::from_le_bytes(bytes[8..16].try_into()?) as usize;
+        let m_v_i_len = u64::from_le_bytes(bytes[16..24].try_into()?) as usize;
+        let m_i_len = u64::from_le_bytes(bytes[24..32].try_into()?) as usize;
+        let m_len = u64::from_le_bytes(bytes[32..40].try_into()?) as usize;
+        let offset = 40;
 
         // Read mesh data
-        let v_end = offset + v_len * size_of::<FullVertex>();
-        let m_v_i_end = v_end + m_v_i_len * size_of::<u32>();
+        let v_end = offset + v_len * size_of::<Vertex>();
+        let attr_end = v_end + attr_len * size_of::<VertexAttributes>();
+        let m_v_i_end = attr_end + m_v_i_len * size_of::<u32>();
         let m_i_end = m_v_i_end + m_i_len * size_of::<u8>();
         let m_end = m_i_end + m_len * size_of::<Meshlet>();
 
@@ -99,21 +117,20 @@ impl MeshletMesh {
             );
         }
 
-        let full_vertices = bytemuck::pod_collect_to_vec(&bytes[offset..v_end]);
+        let vertex_positions = Arc::from(bytemuck::pod_collect_to_vec(&bytes[offset..v_end]));
+        let vertex_attributes = Arc::from(bytemuck::pod_collect_to_vec(&bytes[v_end..attr_end]));
         let meshlet_vertex_indices =
-            Arc::from(bytemuck::pod_collect_to_vec(&bytes[v_end..m_v_i_end]));
+            Arc::from(bytemuck::pod_collect_to_vec(&bytes[attr_end..m_v_i_end]));
         let meshlet_indices = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_v_i_end..m_i_end]));
         let meshlets = Arc::from(bytemuck::pod_collect_to_vec(&bytes[m_i_end..m_end]));
 
-        let (vertices, vertex_attributes) = split_full_vertex(full_vertices);
-
-        let aabb = Aabb::from_vertices(&vertices);
+        let aabb = Aabb::from_vertices(&vertex_positions);
 
         Ok((
             Self {
                 name: "".to_string(),
-                vertex_positions: vertices.into(),
-                vertex_attributes: vertex_attributes.into(),
+                vertex_positions,
+                vertex_attributes,
                 meshlet_vertex_indices,
                 meshlet_indices,
                 meshlets,
@@ -187,16 +204,16 @@ impl MeshletMesh {
 
         let vertices = indices.into_iter().map(|i| {
             let index = i as usize;
-            FullVertex {
-                vertex: Vertex {
+            (
+                Vertex {
                     position: positions[index],
                 },
-                attributes: VertexAttributes {
+                VertexAttributes {
                     normal: normals[index],
                     uv: uvs[index],
                     tangent: tangents[index],
                 },
-            }
+            )
         });
 
         Self::new(vertices)
@@ -260,11 +277,14 @@ impl Aabb {
         }
     }
 
-    pub fn from_vertices(vertices: &[Vertex]) -> Self {
+    pub fn from_vertices(vertices: &[impl meshopt::DecodePosition]) -> Self {
         let (min, max) = vertices
             .iter()
             .fold((Vec3::MAX, Vec3::MIN), |(min, max), v| {
-                (min.min(v.position), max.max(v.position))
+                (
+                    min.min(v.decode_position().into()),
+                    max.max(v.decode_position().into()),
+                )
             });
 
         let center = (min + max) * 0.5;

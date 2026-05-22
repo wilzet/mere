@@ -16,6 +16,7 @@ struct BoundingSphere {
 
 struct Meshlet {
     vertex_offset: u32,
+    attribute_offset: u32,
     vertex_count: u32,
     index_offset: u32,
     index_count: u32,

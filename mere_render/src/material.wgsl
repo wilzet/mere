@@ -42,6 +42,7 @@ struct BoundingSphere {
 
 struct Meshlet {
     vertex_offset: u32,
+    attribute_offset: u32,
     vertex_count: u32,
     index_offset: u32,
     index_count: u32,
@@ -162,10 +163,18 @@ fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
 
     let triangle_id = extractBits(packed_ids, 0, 7);
     let index_ids = triangle_id * 3 + vec3(0, 1, 2);
-    let vertex_ids = vec3(get_meshlet_vertex_id(meshlet, index_ids[0]), get_meshlet_vertex_id(meshlet, index_ids[1]), get_meshlet_vertex_id(meshlet, index_ids[2]));
-    let vertex_0 = get_vertex(vertex_ids[0]);
-    let vertex_1 = get_vertex(vertex_ids[1]);
-    let vertex_2 = get_vertex(vertex_ids[2]);
+    
+    let local_v0 = get_meshlet_local_index(meshlet, index_ids[0]);
+    let local_v1 = get_meshlet_local_index(meshlet, index_ids[1]);
+    let local_v2 = get_meshlet_local_index(meshlet, index_ids[2]);
+
+    let global_v0 = meshlet_vertex_indices[meshlet.vertex_offset + local_v0];
+    let global_v1 = meshlet_vertex_indices[meshlet.vertex_offset + local_v1];
+    let global_v2 = meshlet_vertex_indices[meshlet.vertex_offset + local_v2];
+
+    let vertex_0 = get_vertex(global_v0, meshlet.attribute_offset + local_v0);
+    let vertex_1 = get_vertex(global_v1, meshlet.attribute_offset + local_v1);
+    let vertex_2 = get_vertex(global_v2, meshlet.attribute_offset + local_v2);
 
     let instance_id = info.instance_id;
     let instance = instances[instance_id];
@@ -236,20 +245,18 @@ fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     );
 }
 
-fn get_meshlet_vertex_id(meshlet: Meshlet, index_id: u32) -> u32 {
+fn get_meshlet_local_index(meshlet: Meshlet, index_id: u32) -> u32 {
     let byte_index = meshlet.index_offset + index_id;
     let word_offset = byte_index / 4u;
     let bit_offset = (byte_index % 4u) * 8u;
 
     let packed = meshlet_indices[word_offset];
-    let local_index = (packed >> bit_offset) & 0xFFu;
-
-    return meshlet_vertex_indices[meshlet.vertex_offset + local_index];
+    return (packed >> bit_offset) & 0xFFu;
 }
 
-fn get_vertex(index: u32) -> FullVertex {
+fn get_vertex(index: u32, attribute_index: u32) -> FullVertex {
     let vertex = vertices[index];
-    let attributes = vertex_attributes[index];
+    let attributes = vertex_attributes[attribute_index];
 
     let position = vec3(vertex.position[0], vertex.position[1], vertex.position[2]);
     let normal = unpack_11_11_10(attributes.normal);

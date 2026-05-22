@@ -1,4 +1,4 @@
-use crate::Vertex;
+use crate::VertexAttributes;
 use itertools::Itertools;
 use mere_math::Vec3;
 use metis::{Graph, option::Opt};
@@ -8,13 +8,12 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Meshlet {
     pub vertex_offset: u32,
+    pub attribute_offset: u32,
     pub vertex_count: u32,
     pub index_offset: u32,
     pub index_count: u32,
     // pub lod: u32,
-    pub bounds: BoundingSphere,
-    pub parent_error: BoundingSphere,
-    pub error: f32,
+    pub cull_data: CullData,
 }
 
 impl Meshlet {
@@ -23,17 +22,6 @@ impl Meshlet {
     pub const MIN_TRIANGLES: usize = (Self::MAX_TRIANGLES / 3) & !3;
     pub const MAX_INDICES_PER_MESHLET: u32 = Self::MAX_TRIANGLES as u32 * 3;
     pub const FILL_WEIGHT: f32 = 1.0;
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct MeshletLod {
-    pub vertex_indices: Vec<u32>,
-    pub indices: Vec<u8>,
-    pub meshlets: Vec<Meshlet>,
-}
-
-impl MeshletLod {
-    pub const TARGET_GROUP_SIZE: usize = 4;
 }
 
 #[repr(C)]
@@ -52,52 +40,41 @@ impl BoundingSphere {
     }
 }
 
-fn triangle_center(vertices: &[Vertex], indices: &[u32], tri: usize) -> Vec3 {
-    let i = tri * 3;
-
-    let p0 = vertices[indices[i] as usize].position;
-    let p1 = vertices[indices[i + 1] as usize].position;
-    let p2 = vertices[indices[i + 2] as usize].position;
-
-    (p0 + p1 + p2) * 0.3333333
-}
-
-fn triangle_normal(vertices: &[Vertex], indices: &[u32], tri: usize) -> Vec3 {
-    let i = tri * 3;
-
-    let p0 = vertices[indices[i] as usize].position;
-    let p1 = vertices[indices[i + 1] as usize].position;
-    let p2 = vertices[indices[i + 2] as usize].position;
-
-    (p1 - p0).cross(p2 - p0).normalize()
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CullData {
+    pub bounds: BoundingSphere,
+    pub parent_error: BoundingSphere,
+    pub error: f32,
 }
 
 pub fn generate_meshlets(
-    vertices: &[Vertex],
+    vertices: &meshopt::VertexDataAdapter<'_>,
     indices: &[u32],
+    vertex_positions_remap: &[u32],
     parent_lod: Option<(BoundingSphere, f32)>,
-) -> MeshletLod {
+) -> (meshopt::Meshlets, Vec<CullData>) {
     if indices.is_empty() || indices.len() % 3 != 0 {
-        return MeshletLod::default();
+        return (
+            meshopt::Meshlets {
+                meshlets: Vec::new(),
+                vertices: Vec::new(),
+                triangles: Vec::new(),
+            },
+            Vec::new(),
+        );
     }
 
     let triangle_count = indices.len() / 3;
 
-    // Vertex -> triangle adjacency.
-    let mut vertices_to_triangles = vec![Vec::new(); vertices.len()];
+    // Vertex -> triangle adjacency list tracking
+    let mut vertices_to_triangles = vec![Vec::new(); vertex_positions_remap.len()];
     for (i, &index) in indices.iter().enumerate() {
-        vertices_to_triangles[index as usize].push(i / 3);
+        let vertex_id = vertex_positions_remap[index as usize];
+        vertices_to_triangles[vertex_id as usize].push(i / 3);
     }
 
-    let triangle_centers = (0..triangle_count)
-        .map(|i| triangle_center(vertices, indices, i))
-        .collect::<Vec<_>>();
-
-    let triangle_normals = (0..triangle_count)
-        .map(|i| triangle_normal(vertices, indices, i))
-        .collect::<Vec<_>>();
-
-    // Count shared welded vertices per triangle pair.
+    // Calculate topological sharing across edges
     let mut pair_shared_count = HashMap::with_capacity(triangle_count * 2);
     for tri_ids in vertices_to_triangles {
         for (a, b) in tri_ids.into_iter().tuple_combinations() {
@@ -107,35 +84,24 @@ pub fn generate_meshlets(
         }
     }
 
-    // METIS weighted adjacency graph.
+    // Populate METIS Weighted Graph Structure
     let mut adjacency = vec![Vec::new(); triangle_count];
     for ((a, b), shared) in pair_shared_count {
-        // Ignore weak vertex-only connectivity.
-        if shared < 2 {
-            continue;
-        }
-
-        let dist = (triangle_centers[a] - triangle_centers[b]).length();
-        let normal_similarity = triangle_normals[a].dot(triangle_normals[b]).max(0.0);
-        let spatial = 1.0 / (1.0 + dist);
-
-        // Prefer compact + coplanar regions.
-        let weight = ((normal_similarity + spatial) * 2048.0).clamp(1.0, 4096.0) as i32;
-
-        adjacency[a].push((b, weight));
-        adjacency[b].push((a, weight));
+        adjacency[a].push((b, shared));
+        adjacency[b].push((a, shared));
     }
 
-    // Convert to CSR format for METIS.
-    let total_edges: usize = adjacency.iter().map(Vec::len).sum();
+    for list in adjacency.iter_mut() {
+        list.sort_unstable();
+    }
 
+    // Convert to Compressed Sparse Row (CSR) format
+    let total_edges: usize = adjacency.iter().map(Vec::len).sum();
     let mut xadj = Vec::with_capacity(triangle_count + 1);
     let mut adjncy = Vec::with_capacity(total_edges);
     let mut adjwgt = Vec::with_capacity(total_edges);
-
     for neighbors in &adjacency {
         xadj.push(adjncy.len() as i32);
-
         for &(id, weight) in neighbors {
             adjncy.push(id as i32);
             adjwgt.push(weight);
@@ -143,8 +109,7 @@ pub fn generate_meshlets(
     }
     xadj.push(adjncy.len() as i32);
 
-    // Smaller recursive partitions produce rounder meshlets.
-    let target_size = Meshlet::MAX_TRIANGLES - 8;
+    let target_size = Meshlet::MAX_TRIANGLES - 4;
     let partition_count = triangle_count.div_ceil(target_size).max(1);
 
     let mut options = [-1; metis::NOPTIONS];
@@ -167,69 +132,89 @@ pub fn generate_meshlets(
         partitions[partition as usize].push(tri);
     }
 
-    let vertex_adapter = Vertex::create_vertex_adapter(vertices);
-
-    let mut meshlet_vertices = Vec::new();
-    let mut meshlet_indices = Vec::new();
-    let mut meshlets = Vec::with_capacity(partitions.len());
-
+    let mut meshlets = meshopt::Meshlets {
+        meshlets: Vec::new(),
+        vertices: Vec::new(),
+        triangles: Vec::new(),
+    };
+    let mut cull_data = Vec::new();
     let mut cluster_indices = Vec::new();
+
     for partition in partitions {
         cluster_indices.clear();
         cluster_indices.reserve(partition.len() * 3);
 
         for tri in partition {
             let i = tri * 3;
-
             cluster_indices.extend_from_slice(&indices[i..i + 3]);
         }
 
-        let built = meshopt::build_meshlets_spatial(
+        let new_meshlets = meshopt::build_meshlets_spatial(
             &cluster_indices,
-            &vertex_adapter,
+            vertices,
             Meshlet::MAX_VERTICES,
             Meshlet::MIN_TRIANGLES,
             Meshlet::MAX_TRIANGLES,
             Meshlet::FILL_WEIGHT,
         );
 
-        let bounds_iter = built.iter().map(|m| {
-            let bounds = meshopt::compute_meshlet_bounds(m, &vertex_adapter);
-            BoundingSphere::new(bounds.center.into(), bounds.radius)
-        });
+        cull_data.extend(new_meshlets.iter().map(|m| {
+            let bounds = {
+                let bounds = meshopt::compute_meshlet_bounds(m, vertices);
+                BoundingSphere::new(bounds.center.into(), bounds.radius)
+            };
 
-        for (meshlet, bounds) in built.meshlets.iter().zip(bounds_iter) {
-            let vertex_offset = meshlet_vertices.len() as u32;
-            let index_offset = meshlet_indices.len() as u32;
+            let (parent_error, error) = parent_lod
+                .unwrap_or_else(|| (BoundingSphere::new(bounds.center.into(), f32::MAX), 0.0));
 
-            let v0 = meshlet.vertex_offset as usize;
-            let v1 = v0 + meshlet.vertex_count as usize;
-            meshlet_vertices.extend_from_slice(&built.vertices[v0..v1]);
-
-            let i0 = meshlet.triangle_offset as usize;
-            let i1 = i0 + meshlet.triangle_count as usize * 3;
-            meshlet_indices.extend_from_slice(&built.triangles[i0..i1]);
-
-            let (parent_error, error) = parent_lod.unwrap_or((
-                BoundingSphere::new(bounds.center.into(), f32::INFINITY),
-                0.0,
-            ));
-
-            meshlets.push(Meshlet {
-                vertex_offset,
-                vertex_count: meshlet.vertex_count,
-                index_offset,
-                index_count: meshlet.triangle_count * 3,
+            CullData {
                 bounds,
                 parent_error,
                 error,
-            });
-        }
+            }
+        }));
+
+        merge_meshlets(&mut meshlets, new_meshlets);
     }
 
-    MeshletLod {
-        vertex_indices: meshlet_vertices,
-        indices: meshlet_indices,
-        meshlets,
+    (meshlets, cull_data)
+}
+
+pub fn merge_meshlets(meshlets: &mut meshopt::Meshlets, other: meshopt::Meshlets) {
+    let vertex_offset = meshlets.vertices.len() as u32;
+    let index_offset = meshlets.triangles.len() as u32;
+
+    meshlets.vertices.extend_from_slice(&other.vertices);
+    meshlets.triangles.extend_from_slice(&other.triangles);
+    meshlets
+        .meshlets
+        .extend(other.meshlets.into_iter().map(|mut meshlet| {
+            meshlet.vertex_offset += vertex_offset;
+            meshlet.triangle_offset += index_offset;
+            meshlet
+        }));
+}
+
+pub fn build_per_meshlet_attributes(
+    meshlet: &meshopt::ffi::meshopt_Meshlet,
+    cull_data: CullData,
+    meshlet_vertex_ids: &[u32],
+    vertex_attributes: &[VertexAttributes],
+    out_attributes: &mut Vec<VertexAttributes>,
+    out_meshlets: &mut Vec<Meshlet>,
+) {
+    let attribute_offset = out_attributes.len() as u32;
+
+    for &vertex_id in meshlet_vertex_ids {
+        out_attributes.push(vertex_attributes[vertex_id as usize]);
     }
+
+    out_meshlets.push(Meshlet {
+        vertex_offset: meshlet.vertex_offset,
+        attribute_offset,
+        vertex_count: meshlet.vertex_count,
+        index_offset: meshlet.triangle_offset,
+        index_count: meshlet.triangle_count * 3,
+        cull_data,
+    });
 }
