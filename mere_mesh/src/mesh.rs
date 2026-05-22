@@ -23,8 +23,6 @@ impl MeshletMesh {
         let (vertex_positions, vertex_attributes) =
             vertices.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
 
-        let aabb = Aabb::from_vertices(&vertex_positions);
-
         let vertices = Vertex::create_vertex_adapter(&vertex_positions);
         let vertex_positions_remap = meshopt::generate_position_remap(&vertices);
         let indices = (0..vertex_positions.len() as u32).collect::<Vec<_>>();
@@ -47,6 +45,8 @@ impl MeshletMesh {
                 &mut meshlet_meshlets,
             );
         }
+
+        let aabb = Aabb::from_vertices(&vertex_positions);
 
         Self {
             name: "".to_string(),

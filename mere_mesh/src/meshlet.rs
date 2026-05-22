@@ -25,6 +25,14 @@ impl Meshlet {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CullData {
+    pub bounds: BoundingSphere,
+    pub parent_error: BoundingSphere,
+    pub error: f32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BoundingSphere {
     pub center: Vec3,
@@ -40,13 +48,7 @@ impl BoundingSphere {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CullData {
-    pub bounds: BoundingSphere,
-    pub parent_error: BoundingSphere,
-    pub error: f32,
-}
+// --- Meshlet Generation
 
 pub fn generate_meshlets(
     vertices: &meshopt::VertexDataAdapter<'_>,
@@ -218,3 +220,30 @@ pub fn build_per_meshlet_attributes(
         cull_data,
     });
 }
+
+// Code for meshlet generation based on:
+//  * https://github.com/bevyengine/bevy/blob/d98861cc3da219a358953830f33d135b5342d013/crates/bevy_pbr/src/meshlet/from_mesh.rs
+//  * https://github.com/zeux/meshoptimizer/blob/c619e7b941646e72ad1da67c058811207bcbcf88/demo/clusterlod.h
+//
+// Edited by permission of the MIT license:
+//
+// MIT License
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
