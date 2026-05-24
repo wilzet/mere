@@ -1,5 +1,5 @@
 use crate::{
-    meshlet::{Meshlet, build_per_meshlet_attributes, generate_meshlets},
+    meshlet::{Meshlet, generate_meshlets},
     util::*,
     vertex::{Vertex, VertexAttributes},
 };
@@ -31,27 +31,25 @@ impl MeshletMesh {
             generate_meshlets(&vertices, &indices, &vertex_positions_remap, None);
         // let mut simplification_queue = (0..meshlets.len() as u32).collect::<Vec<_>>();
 
-        let mut meshlet_attributes = Vec::new();
-        let mut meshlet_meshlets = Vec::new();
-
-        for (i, (meshlet, &cull_data)) in meshlets.meshlets.iter().zip(cull_data.iter()).enumerate()
-        {
-            build_per_meshlet_attributes(
-                meshlet,
+        let meshlet_meshlets = meshlets
+            .meshlets
+            .iter()
+            .zip(cull_data)
+            .map(|(meshlet, cull_data)| Meshlet {
+                vertex_offset: meshlet.vertex_offset,
+                vertex_count: meshlet.vertex_count,
+                index_offset: meshlet.triangle_offset,
+                index_count: meshlet.triangle_count * 3,
                 cull_data,
-                meshlets.get(i).vertices,
-                &vertex_attributes,
-                &mut meshlet_attributes,
-                &mut meshlet_meshlets,
-            );
-        }
+            })
+            .collect::<Vec<_>>();
 
         let aabb = Aabb::from_vertices(&vertex_positions);
 
         Self {
             name: "".to_string(),
             vertex_positions: vertex_positions.into(),
-            vertex_attributes: meshlet_attributes.into(),
+            vertex_attributes: vertex_attributes.into(),
             meshlet_vertex_indices: meshlets.vertices.into(),
             meshlet_indices: meshlets.triangles.into(),
             meshlets: meshlet_meshlets.into(),

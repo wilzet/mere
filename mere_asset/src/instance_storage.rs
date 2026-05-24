@@ -52,6 +52,7 @@ impl InstanceStorage {
     }
 
     pub fn iter_mut(&mut self) -> slotmap::dense::ValuesMut<'_, InstanceHandle, Instance> {
+        self.dirty = true;
         self.instances.values_mut()
     }
 

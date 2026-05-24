@@ -1,4 +1,3 @@
-use crate::VertexAttributes;
 use itertools::Itertools;
 use mere_math::Vec3;
 use metis::{Graph, option::Opt};
@@ -8,7 +7,6 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Meshlet {
     pub vertex_offset: u32,
-    pub attribute_offset: u32,
     pub vertex_count: u32,
     pub index_offset: u32,
     pub index_count: u32,
@@ -117,9 +115,6 @@ pub fn generate_meshlets(
     let mut options = [-1; metis::NOPTIONS];
     options[metis::option::Seed::INDEX] = 0x5EAF00D;
     options[metis::option::UFactor::INDEX] = 1;
-    options[metis::option::MinConn::INDEX] = 1;
-    options[metis::option::Contig::INDEX] = 1;
-    options[metis::option::ObjType::INDEX] = 0;
 
     let mut partition_per_triangle = vec![0; triangle_count];
     Graph::new(1, partition_count as i32, &xadj, &adjncy)
@@ -129,9 +124,10 @@ pub fn generate_meshlets(
         .part_recursive(&mut partition_per_triangle)
         .unwrap();
 
-    let mut partitions = vec![Vec::new(); partition_count];
+    let mut indices_per_partition = vec![Vec::new(); partition_count];
     for (tri, &partition) in partition_per_triangle.iter().enumerate() {
-        partitions[partition as usize].push(tri);
+        let i = tri * 3;
+        indices_per_partition[partition as usize].extend_from_slice(&indices[i..i + 3]);
     }
 
     let mut meshlets = meshopt::Meshlets {
@@ -140,17 +136,8 @@ pub fn generate_meshlets(
         triangles: Vec::new(),
     };
     let mut cull_data = Vec::new();
-    let mut cluster_indices = Vec::new();
 
-    for partition in partitions {
-        cluster_indices.clear();
-        cluster_indices.reserve(partition.len() * 3);
-
-        for tri in partition {
-            let i = tri * 3;
-            cluster_indices.extend_from_slice(&indices[i..i + 3]);
-        }
-
+    for cluster_indices in indices_per_partition {
         let new_meshlets = meshopt::build_meshlets_spatial(
             &cluster_indices,
             vertices,
@@ -197,30 +184,6 @@ pub fn merge_meshlets(meshlets: &mut meshopt::Meshlets, other: meshopt::Meshlets
         }));
 }
 
-pub fn build_per_meshlet_attributes(
-    meshlet: &meshopt::ffi::meshopt_Meshlet,
-    cull_data: CullData,
-    meshlet_vertex_ids: &[u32],
-    vertex_attributes: &[VertexAttributes],
-    out_attributes: &mut Vec<VertexAttributes>,
-    out_meshlets: &mut Vec<Meshlet>,
-) {
-    let attribute_offset = out_attributes.len() as u32;
-
-    for &vertex_id in meshlet_vertex_ids {
-        out_attributes.push(vertex_attributes[vertex_id as usize]);
-    }
-
-    out_meshlets.push(Meshlet {
-        vertex_offset: meshlet.vertex_offset,
-        attribute_offset,
-        vertex_count: meshlet.vertex_count,
-        index_offset: meshlet.triangle_offset,
-        index_count: meshlet.triangle_count * 3,
-        cull_data,
-    });
-}
-
 // Code for meshlet generation based on:
 //  * https://github.com/bevyengine/bevy/blob/d98861cc3da219a358953830f33d135b5342d013/crates/bevy_pbr/src/meshlet/from_mesh.rs
 //  * https://github.com/zeux/meshoptimizer/blob/c619e7b941646e72ad1da67c058811207bcbcf88/demo/clusterlod.h
@@ -246,4 +209,3 @@ pub fn build_per_meshlet_attributes(
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
