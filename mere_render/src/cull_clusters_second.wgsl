@@ -58,6 +58,31 @@ struct DrawIndirectArgs {
 
 @group(1) @binding(0) var<uniform> render_view: RenderView;
 
+fn is_outside_frustum(instance_id: u32, meshlet: Meshlet) -> bool {
+    let bounds = meshlet.bounds;
+    let m = instances[instance_id].model_matrix;
+    let model_matrix = transpose(mat4x4(
+        m[0],
+        m[1],
+        m[2],
+        vec4(0.0, 0.0, 0.0, 1.0),
+    ));
+
+    let center = (model_matrix * vec4(bounds.center_x, bounds.center_y, bounds.center_z, 1.0)).xyz;
+    let radius = bounds.radius;
+
+    for (var i = 0u; i < 6u; i = i + 1u) {
+        let plane = render_view.planes[i];
+        let distance = dot(plane.xyz, center) + plane.w;
+
+        if distance < -radius {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 struct ScreenAabb {
     min: vec3<f32>,
     max: vec3<f32>,
@@ -206,6 +231,8 @@ fn cull_clusters(
     let meshlet_id = info.meshlet_id;
 
     let meshlet = meshlets[meshlet_id];
+
+    if is_outside_frustum(instance_id, meshlet) { return; }
 
     if is_occluded(instance_id, meshlet) { return; }
 
