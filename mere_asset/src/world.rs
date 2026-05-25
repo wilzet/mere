@@ -38,7 +38,7 @@ impl World {
             config.height,
             0.1,
             200.0,
-            Vec3::new(0.0, 10.0, -10.0),
+            Vec3::new(-10.0, 2.0, 0.0),
         );
         main_camera.look_at(Vec3::ZERO);
 

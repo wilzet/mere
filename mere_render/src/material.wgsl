@@ -370,7 +370,7 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
             let world_bitangent = normalize(cross(world_normal, world_tangent.xyz) * world_tangent.w);
             let tbn_matrix = transpose(mat3x3(world_tangent.xyz, world_bitangent, world_normal));
 
-            const light_pos: vec3<f32> = vec3(-5.0, -5.0, 10.0);
+            const light_pos: vec3<f32> = vec3(0.0, 15.0, 0.0);
             const light_color: vec3<f32> = vec3(1.0, 1.0, 1.0);
 
             let world_position = vertex_output.world_position;
