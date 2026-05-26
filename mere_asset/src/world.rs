@@ -290,10 +290,6 @@ impl World {
 
         profiler.end();
     }
-
-    pub fn after_render(&mut self) {
-        self.resources.after_render();
-    }
 }
 
 fn background_load_task(

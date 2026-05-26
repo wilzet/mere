@@ -93,7 +93,7 @@ impl State {
         let config = mere_renderer.get_config();
 
         world.load_gltf("sponza/main_sponza", device, queue)?;
-        world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
+        //world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
         // let teapot_handle = world.load_gltf("utah_teapot", device, queue)?[0];
         // let teapot = world.get_instance(teapot_handle).unwrap().clone();
 
@@ -321,7 +321,6 @@ impl State {
     }
 
     pub fn after_render(&mut self) {
-        self.world.after_render();
         self.profiler.finish_frame();
     }
 }

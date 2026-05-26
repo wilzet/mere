@@ -333,6 +333,11 @@ impl ResourceStorage {
         meshlets: &MeshletStorage,
         instances: &InstanceStorage,
     ) {
+        std::mem::swap(
+            &mut self.current_depth_pyramid,
+            &mut self.previous_depth_pyramid,
+        );
+
         let visibility_buffer = self
             .visibility_buffer
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -783,13 +788,6 @@ impl ResourceStorage {
             &self
                 .visibility_buffer
                 .create_view(&wgpu::TextureViewDescriptor::default()),
-        );
-    }
-
-    pub fn after_render(&mut self) {
-        std::mem::swap(
-            &mut self.current_depth_pyramid,
-            &mut self.previous_depth_pyramid,
         );
     }
 

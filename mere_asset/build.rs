@@ -82,7 +82,7 @@ fn process_asset(path: &Path, out_dir: &Path) -> anyhow::Result<()> {
         mere_mesh::write_mere_file(&output_path, processed_meshes)?;
     }
 
-    //fs::write(&hash_path, new_hash)?;
+    fs::write(&hash_path, new_hash)?;
 
     Ok(())
 }
