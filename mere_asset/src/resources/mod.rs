@@ -22,9 +22,10 @@ pub struct ResourceStorage {
 
     second_pass_instance_candidates: Option<wgpu::Buffer>,
 
-    pub visibility_buffer: wgpu::Texture,
+    pub visibility_buffer: wgpu::TextureView,
     pub dummy_render_target: wgpu::TextureView,
     pub material_depth: Texture,
+    dummy_target: wgpu::TextureView,
     pub current_depth_pyramid: DepthPyramid,
     pub previous_depth_pyramid: DepthPyramid,
     pub meshlet_per_frame_resources: Option<PerFrameResources>,
@@ -57,16 +58,55 @@ impl ResourceStorage {
             depth_or_array_layers: 1,
         };
 
-        let visibility_buffer = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("visibility_buffer"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R64Uint,
-            usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        });
+        let visibility_buffer = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("visibility_buffer"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R64Uint,
+                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let dummy_target = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("depth_mips_dummy_texture"),
+                size: wgpu::Extent3d::default(),
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some("depth_mips_dummy_texture_view"),
+                format: Some(wgpu::TextureFormat::R32Float),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                usage: None,
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(1),
+            });
+
+        let current_depth_pyramid = DepthPyramid::new(
+            device,
+            "current_depth_pyramid",
+            &visibility_buffer,
+            &dummy_target,
+        );
+
+        let previous_depth_pyramid = DepthPyramid::new(
+            device,
+            "previous_depth_pyramid",
+            &visibility_buffer,
+            &dummy_target,
+        );
 
         Self {
             cluster_info: device.create_buffer(&wgpu::BufferDescriptor {
@@ -88,7 +128,7 @@ impl ResourceStorage {
                 mapped_at_creation: false,
             }),
             culling_render_view: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("cullin_render_view"),
+                label: Some("culling_render_view"),
                 size: size_of::<RenderView>() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -101,16 +141,9 @@ impl ResourceStorage {
                 "material_depth_texture",
                 true,
             ),
-            previous_depth_pyramid: DepthPyramid::new(
-                device,
-                "previous_depth_pyramid",
-                &visibility_buffer.create_view(&wgpu::TextureViewDescriptor::default()),
-            ),
-            current_depth_pyramid: DepthPyramid::new(
-                device,
-                "current_depth_pyramid",
-                &visibility_buffer.create_view(&wgpu::TextureViewDescriptor::default()),
-            ),
+            dummy_target,
+            current_depth_pyramid,
+            previous_depth_pyramid,
             visibility_buffer,
             dummy_render_target: device
                 .create_texture(&wgpu::TextureDescriptor {
@@ -338,10 +371,6 @@ impl ResourceStorage {
             &mut self.previous_depth_pyramid,
         );
 
-        let visibility_buffer = self
-            .visibility_buffer
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
         let visible_instance_cluster_count =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("visible_instance_cluster_count"),
@@ -412,7 +441,7 @@ impl ResourceStorage {
                     layout: &self.visibility_buffer_clear_bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                        resource: wgpu::BindingResource::TextureView(&self.visibility_buffer),
                     }],
                 },
             ),
@@ -615,7 +644,7 @@ impl ResourceStorage {
                         },
                         wgpu::BindGroupEntry {
                             binding: 7,
-                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                            resource: wgpu::BindingResource::TextureView(&self.visibility_buffer),
                         },
                     ],
                 },
@@ -677,7 +706,7 @@ impl ResourceStorage {
                         },
                         wgpu::BindGroupEntry {
                             binding: 7,
-                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                            resource: wgpu::BindingResource::TextureView(&self.visibility_buffer),
                         },
                     ],
                 },
@@ -713,7 +742,7 @@ impl ResourceStorage {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&visibility_buffer),
+                            resource: wgpu::BindingResource::TextureView(&self.visibility_buffer),
                         },
                     ],
                 },
@@ -747,16 +776,18 @@ impl ResourceStorage {
             depth_or_array_layers: 1,
         };
 
-        self.visibility_buffer = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("visibility_buffer"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R64Uint,
-            usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        });
+        self.visibility_buffer = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("visibility_buffer"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R64Uint,
+                usage: wgpu::TextureUsages::STORAGE_ATOMIC | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         self.dummy_render_target = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -777,17 +808,15 @@ impl ResourceStorage {
         self.current_depth_pyramid = DepthPyramid::new(
             device,
             &self.current_depth_pyramid.depth_pyramid.label,
-            &self
-                .visibility_buffer
-                .create_view(&wgpu::TextureViewDescriptor::default()),
+            &self.visibility_buffer,
+            &self.dummy_target,
         );
 
         self.previous_depth_pyramid = DepthPyramid::new(
             device,
             &self.previous_depth_pyramid.depth_pyramid.label,
-            &self
-                .visibility_buffer
-                .create_view(&wgpu::TextureViewDescriptor::default()),
+            &self.visibility_buffer,
+            &self.dummy_target,
         );
     }
 
@@ -807,14 +836,15 @@ impl ResourceStorage {
         } else {
             0
         };
-        total += (self.visibility_buffer.size().width * self.visibility_buffer.size().height)
-            as usize
+        total += (self.visibility_buffer.texture().width()
+            * self.visibility_buffer.texture().height()) as usize
             * size_of::<u64>();
         total += (self.dummy_render_target.texture().width()
             * self.dummy_render_target.texture().height()) as usize
             * size_of::<u8>();
         total += self.material_depth.size_in_bytes();
         total += self.current_depth_pyramid.depth_pyramid.size_in_bytes();
+        total += self.previous_depth_pyramid.depth_pyramid.size_in_bytes();
         total += if let Some(per_frame) = self.meshlet_per_frame_resources.as_ref() {
             (per_frame.instance_second_indirect_args.size()
                 + per_frame.cluster_indirect_args.size()

@@ -17,7 +17,7 @@ pub struct DepthPyramid {
 }
 
 impl DepthPyramid {
-    pub fn new(device: &wgpu::Device, label: &str, source: &wgpu::TextureView) -> Self {
+    pub fn new(device: &wgpu::Device, label: &str, source: &wgpu::TextureView, dummy_target: &wgpu::TextureView) -> Self {
         let width = source.texture().width();
         let height = source.texture().height();
         let size = wgpu::Extent3d {
@@ -44,29 +44,6 @@ impl DepthPyramid {
             device,
         );
 
-        let dummy_texture = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("depth_mips_dummy_texture"),
-                size: wgpu::Extent3d::default(),
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&wgpu::TextureViewDescriptor {
-                label: Some("depth_mips_dummy_texture_view"),
-                format: Some(wgpu::TextureFormat::R32Float),
-                dimension: Some(wgpu::TextureViewDimension::D2),
-                usage: None,
-                aspect: wgpu::TextureAspect::All,
-                base_mip_level: 0,
-                mip_level_count: Some(1),
-                base_array_layer: 0,
-                array_layer_count: Some(1),
-            });
-
         let depth_pyramid_mips = std::array::from_fn(|i| {
             if (i as u32) < mip_count {
                 depth_pyramid
@@ -83,7 +60,7 @@ impl DepthPyramid {
                         array_layer_count: Some(1),
                     })
             } else {
-                dummy_texture.clone()
+                dummy_target.clone()
             }
         });
 

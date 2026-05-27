@@ -12,6 +12,7 @@ use winit::{
 pub struct App {
     state: Option<State>,
     last_frame_time: Instant,
+    l: Instant,
 }
 
 impl App {
@@ -19,6 +20,7 @@ impl App {
         Self {
             state: None,
             last_frame_time: Instant::now(),
+            l: Instant::now(),
         }
     }
 }
@@ -63,6 +65,14 @@ impl ApplicationHandler for App {
                 let dt = now - self.last_frame_time;
                 self.last_frame_time = now;
                 state.update(dt);
+
+                // let dtt = now - self.l;
+                // if dtt.as_secs_f32() < 0.2 {
+                //     state.request_redraw();
+                //     return;
+                // }
+
+                self.l = now;
 
                 if let Err(err) = state.render(dt) {
                     mere_log::error!("Render error: {err}");

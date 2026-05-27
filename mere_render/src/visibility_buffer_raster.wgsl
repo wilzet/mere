@@ -65,7 +65,8 @@ fn vs_main(
     @builtin(vertex_index) index_id: u32,
     @builtin(instance_index) cluster_id: u32,
 ) -> VertexOutput {
-    let info = cluster_info[raster_count + cluster_id];
+    let corrected_cluster_id = raster_count + cluster_id;
+    let info = cluster_info[corrected_cluster_id];
     let instance_id = info.instance_id;
     let meshlet_id = info.meshlet_id;
 
@@ -88,7 +89,7 @@ fn vs_main(
     let world_position = model_matrix * position;
     let clip_position = main_camera.view_proj * world_position;
 
-    let packed_id = (cluster_id << 7) | (index_id / 3);
+    let packed_id = (corrected_cluster_id << 7) | (index_id / 3);
 
     return VertexOutput(
         clip_position,

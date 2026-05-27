@@ -98,16 +98,15 @@ fn max8(p0: vec3<f32>, p1: vec3<f32>, p2: vec3<f32>, p3: vec3<f32>,
     return max(max(max(p0, p1), max(p2, p3)), max(max(p4, p5), max(p6, p7)));
 }
 
-fn project_aabb(clip_from_local: mat4x4<f32>, near: f32, bounds: BoundingSphere, out: ptr<function, ScreenAabb>) -> bool {
-    let center = vec3(bounds.center_x, bounds.center_y, bounds.center_z);
-    let half_extents = vec3(bounds.radius);
+fn project_aabb(view_proj: mat4x4<f32>, near: f32, world_center: vec3<f32>, world_radius: f32, out: ptr<function, ScreenAabb>) -> bool {
+    let half_extents = vec3(world_radius);
+    let extents = half_extents * 2.0;
 
-    let extents = half_extents * 2;
-    let sx = clip_from_local * vec4<f32>(extents.x, 0.0, 0.0, 0.0);
-    let sy = clip_from_local * vec4<f32>(0.0, extents.y, 0.0, 0.0);
-    let sz = clip_from_local * vec4<f32>(0.0, 0.0, extents.z, 0.0);
+    let sx = view_proj * vec4<f32>(extents.x, 0.0, 0.0, 0.0);
+    let sy = view_proj * vec4<f32>(0.0, extents.y, 0.0, 0.0);
+    let sz = view_proj * vec4<f32>(0.0, 0.0, extents.z, 0.0);
 
-    let p0 = clip_from_local * vec4<f32>(center - half_extents, 1.0);
+    let p0 = view_proj * vec4<f32>(world_center - half_extents, 1.0);
     let p1 = p0 + sz;
     let p2 = p0 + sy;
     let p3 = p2 + sz;
@@ -168,9 +167,15 @@ fn is_occluded(instance_id: u32, meshlet: Meshlet) -> bool {
         vec4(0.0, 0.0, 0.0, 1.0),
     ));
 
-    let clip_from_local = projection * model_matrix;
+    let bounds = meshlet.bounds;
+    let world_center = (model_matrix * vec4(bounds.center_x, bounds.center_y, bounds.center_z, 1.0)).xyz;
+    let scale_x = length(vec3(model_matrix[0][0], model_matrix[0][1], model_matrix[0][2]));
+    let scale_y = length(vec3(model_matrix[1][0], model_matrix[1][1], model_matrix[1][2]));
+    let scale_z = length(vec3(model_matrix[2][0], model_matrix[2][1], model_matrix[2][2]));
+    let world_radius = bounds.radius * max(scale_x, max(scale_y, scale_z));
+
     var screen_aabb = ScreenAabb(vec3(0.0), vec3(0.0));
-    if project_aabb(clip_from_local, near, meshlet.bounds, &screen_aabb) {
+    if project_aabb(projection, near, world_center, world_radius, &screen_aabb) {
         let hzb_size = vec2<f32>(textureDimensions(depth_pyramid).xy);
 
         let aabb_min_px = screen_aabb.min.xy * hzb_size;
@@ -217,15 +222,16 @@ const MAX_WORKGROUP_DIM: u32 = 65535;
 
 @compute @workgroup_size(BLOCK_SIZE, 1, 1)
 fn cull_clusters(
-    @builtin(global_invocation_id) global_id: vec3<u32>
+    @builtin(workgroup_id) block_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
 ) {
-    let cluster_id = global_id.y * MAX_WORKGROUP_DIM * BLOCK_SIZE + global_id.x;
+    let workgroup_id = block_id.y * MAX_WORKGROUP_DIM + block_id.x;
+    let cluster_id = workgroup_id * BLOCK_SIZE + local_id.x;
 
     if cluster_id >= visible_instance_cluster_count { return; }
 
     let info = cluster_info[cluster_id];
     let instance_id = info.instance_id;
-
     let meshlet_id = info.meshlet_id;
 
     let meshlet = meshlets[meshlet_id];
