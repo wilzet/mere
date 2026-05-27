@@ -17,7 +17,7 @@ mod egui_debugger;
 mod pipeline;
 mod renderer;
 
-pub const CLUSTER_SLOTS: u32 = 1 << 23;
+pub const CLUSTER_SLOTS: u32 = 1 << 24;
 
 #[derive(PartialEq, Clone, Copy, Default, Debug)]
 pub enum DebugMode {
@@ -115,7 +115,7 @@ impl State {
 
             world.add_instance(
                 Transform::new()
-                    .with_translation(Vec3::new(x, y, z))
+                    .with_translation(Vec3::new(x - 50.0, y + 25.0, z - 50.0))
                     .with_rotation(rotation),
                 teapot.meshlet_mesh,
                 teapot.material,
@@ -296,6 +296,16 @@ impl State {
             self.egui_renderer.begin_frame(&self.window);
 
             self.profiler.resolve(&mut encoder);
+
+            if let Some(per_frame) = &self.world.resources().meshlet_per_frame_resources {
+                encoder.copy_buffer_to_buffer(
+                    &per_frame.raster_count,
+                    0,
+                    &self.world.resources().debug_cluster_staging_buffer,
+                    0,
+                    size_of::<u32>() as u64,
+                );
+            }
 
             self.egui_renderer.debug_window(
                 &mut self.profiler,

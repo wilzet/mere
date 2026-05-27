@@ -110,7 +110,16 @@ pub fn debugger(
 
     let (width, height): (u32, u32) = window.inner_size().into();
 
-    draw_overlay_controls(ctx, queue, world, avg_fps, frame_time_ms, lock_view, debug);
+    draw_overlay_controls(
+        debug,
+        ctx,
+        device,
+        queue,
+        world,
+        avg_fps,
+        frame_time_ms,
+        lock_view,
+    );
 
     egui::Window::new(
         egui::RichText::new("MeRe Engine Debugger")
@@ -206,14 +215,38 @@ fn apply_style(ctx: &egui::Context) {
 }
 
 fn draw_overlay_controls(
+    debug: &mut Debug,
     ctx: &egui::Context,
+    device: &wgpu::Device,
     queue: &wgpu::Queue,
     world: &mut World,
     avg_fps: f32,
     frame_time_ms: f32,
     lock_view: &mut bool,
-    debug: &mut Debug,
 ) {
+    let buffer_slice = world.resources().debug_cluster_staging_buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    buffer_slice.map_async(wgpu::MapMode::Read, move |res| {
+        let _ = tx.send(res);
+    });
+
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+    let visible_clusters = if let Ok(Ok(_)) = rx.try_recv() {
+        let data = buffer_slice.get_mapped_range();
+        let counts = bytemuck::cast_slice(&data);
+
+        let visible_clusters = counts.get(0).copied().unwrap_or(0u32);
+
+        drop(data);
+        world.resources().debug_cluster_staging_buffer.unmap();
+
+        visible_clusters
+    } else {
+        0
+    };
+
     egui::Area::new(egui::Id::new("overlay_controls"))
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
         .show(ctx, |ui| {
@@ -283,6 +316,63 @@ fn draw_overlay_controls(
                             bytemuck::cast_slice(&[mode_u32]),
                         );
                     }
+
+                    ui.separator();
+                    ui.label(section_header("Culling Stats"));
+
+                    let total_clusters = world.instances().count_clusters();
+                    let culled_clusters = total_clusters.saturating_sub(visible_clusters as usize);
+
+                    let (visible_pct, culled_pct) = if total_clusters > 0 {
+                        let total_f = total_clusters as f32;
+                        (
+                            (visible_clusters as f32 / total_f) * 100.0,
+                            (culled_clusters as f32 / total_f) * 100.0,
+                        )
+                    } else {
+                        (0.0, 0.0)
+                    };
+
+                    egui::Grid::new("culling_stats_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label("Visible:");
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} ({:.1}%)",
+                                    visible_clusters, visible_pct
+                                ))
+                                .color(egui::Color32::LIGHT_GREEN)
+                                .monospace()
+                                .strong(),
+                            );
+                            ui.end_row();
+
+                            ui.label("Culled:");
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} ({:.1}%)",
+                                    culled_clusters, culled_pct
+                                ))
+                                .color(if culled_clusters > 0 {
+                                    ACCENT
+                                } else {
+                                    egui::Color32::GRAY
+                                })
+                                .monospace()
+                                .strong(),
+                            );
+                            ui.end_row();
+
+                            ui.label("Total Clusters:");
+                            ui.label(
+                                egui::RichText::new(format!("{}", total_clusters))
+                                    .color(egui::Color32::LIGHT_GRAY)
+                                    .monospace(),
+                            );
+                            ui.end_row();
+                        });
                 });
         });
 }

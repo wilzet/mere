@@ -21,6 +21,7 @@ pub struct PerFrameResources {
     pub instance_second_indirect_args: wgpu::Buffer,
     pub cluster_indirect_args: wgpu::Buffer,
     pub indirect_draw_args: wgpu::Buffer,
+    pub raster_count: wgpu::Buffer,
     pub bind_groups: MeshletBindGroups,
 }
 
