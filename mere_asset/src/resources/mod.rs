@@ -21,6 +21,7 @@ pub struct ResourceStorage {
     render_view: RenderView,
 
     second_pass_instance_candidates: Option<wgpu::Buffer>,
+    second_pass_cluster_candidates: wgpu::Buffer,
 
     pub visibility_buffer: wgpu::TextureView,
     pub dummy_render_target: wgpu::TextureView,
@@ -135,6 +136,12 @@ impl ResourceStorage {
             }),
             render_view: RenderView::new(main_camera),
             second_pass_instance_candidates: None,
+            second_pass_cluster_candidates: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("second_pass_cluster_candidates"),
+                size: 2 * cluster_slots as u64 * size_of::<u32>() as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
             material_depth: Texture::create_depth_texture(
                 device,
                 config,
@@ -231,6 +238,8 @@ impl ResourceStorage {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         }),
+                        storage_buffer(false),
+                        storage_buffer(false),
                         storage_buffer(false),
                         storage_buffer(false),
                     ],
@@ -371,9 +380,9 @@ impl ResourceStorage {
             &mut self.previous_depth_pyramid,
         );
 
-        let visible_instance_cluster_count =
+        let first_pass_cluster_count =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("visible_instance_cluster_count"),
+                label: Some("first_pass_cluster_count"),
                 contents: bytemuck::bytes_of(&0u32),
                 usage: wgpu::BufferUsages::STORAGE,
             });
@@ -403,6 +412,13 @@ impl ResourceStorage {
         let second_pass_instance_count =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("second_pass_instance_count"),
+                contents: bytemuck::bytes_of(&0u32),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
+        let second_pass_cluster_count =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("second_pass_cluster_count"),
                 contents: bytemuck::bytes_of(&0u32),
                 usage: wgpu::BufferUsages::STORAGE,
             });
@@ -474,7 +490,7 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
-                        resource: visible_instance_cluster_count.as_entire_binding(),
+                        resource: first_pass_cluster_count.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 7,
@@ -519,11 +535,11 @@ impl ResourceStorage {
                         .bind_group_entry_view(4),
                     wgpu::BindGroupEntry {
                         binding: 5,
-                        resource: self.cluster_info.as_entire_binding(),
+                        resource: self.second_pass_cluster_candidates.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
-                        resource: visible_instance_cluster_count.as_entire_binding(),
+                        resource: second_pass_cluster_count.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 7,
@@ -557,7 +573,7 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: visible_instance_cluster_count.as_entire_binding(),
+                        resource: first_pass_cluster_count.as_entire_binding(),
                     },
                     self.previous_depth_pyramid
                         .depth_pyramid
@@ -569,6 +585,14 @@ impl ResourceStorage {
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: indirect_draw_args.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: self.second_pass_cluster_candidates.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: second_pass_cluster_count.as_entire_binding(),
                     },
                 ],
             }),
@@ -586,11 +610,11 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: self.cluster_info.as_entire_binding(),
+                        resource: self.second_pass_cluster_candidates.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: visible_instance_cluster_count.as_entire_binding(),
+                        resource: second_pass_cluster_count.as_entire_binding(),
                     },
                     self.current_depth_pyramid
                         .depth_pyramid
@@ -663,11 +687,11 @@ impl ResourceStorage {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: visible_instance_cluster_count.as_entire_binding(),
+                        resource: raster_count.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: raster_count.as_entire_binding(),
+                        resource: second_pass_cluster_count.as_entire_binding(),
                     },
                 ],
             }),

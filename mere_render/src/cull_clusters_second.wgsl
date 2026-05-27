@@ -46,8 +46,8 @@ struct DrawIndirectArgs {
 @group(0) @binding(0) var<storage, read> instances: array<MeshUniform>;
 @group(0) @binding(1) var<storage, read> meshlets: array<Meshlet>;
 
-@group(0) @binding(2) var<storage, read> cluster_info: array<ClusterInfo>;
-@group(0) @binding(3) var<storage, read> visible_instance_cluster_count: u32;
+@group(0) @binding(2) var<storage, read> second_pass_cluster_candidates: array<ClusterInfo>;
+@group(0) @binding(3) var<storage, read> second_pass_cluster_count: u32;
 
 @group(0) @binding(4) var depth_pyramid: texture_2d<f32>;
 
@@ -229,9 +229,9 @@ fn cull_clusters(
     let workgroup_id = block_id.y * MAX_WORKGROUP_DIM + block_id.x;
     let cluster_id = workgroup_id * BLOCK_SIZE + local_id.x;
 
-    if cluster_id >= visible_instance_cluster_count { return; }
+    if cluster_id >= second_pass_cluster_count { return; }
 
-    let info = cluster_info[cluster_id];
+    let info = second_pass_cluster_candidates[cluster_id];
     let instance_id = info.instance_id;
     let meshlet_id = info.meshlet_id;
 

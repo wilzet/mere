@@ -47,12 +47,15 @@ struct DrawIndirectArgs {
 @group(0) @binding(1) var<storage, read> meshlets: array<Meshlet>;
 
 @group(0) @binding(2) var<storage, read> cluster_info: array<ClusterInfo>;
-@group(0) @binding(3) var<storage, read> visible_instance_cluster_count: u32;
+@group(0) @binding(3) var<storage, read> first_pass_cluster_count: u32;
 
 @group(0) @binding(4) var depth_pyramid: texture_2d<f32>;
 
 @group(0) @binding(5) var<storage, read_write> visible_cluster_info: array<ClusterInfo>;
 @group(0) @binding(6) var<storage, read_write> indirect_args: DrawIndirectArgs;
+
+@group(0) @binding(7) var<storage, read_write> second_pass_cluster_candidates: array<ClusterInfo>;
+@group(0) @binding(8) var<storage, read_write> second_pass_cluster_count: atomic<u32>;
 
 @group(1) @binding(0) var<uniform> render_view: RenderView;
 
@@ -228,7 +231,7 @@ fn cull_clusters(
     let workgroup_id = block_id.y * MAX_WORKGROUP_DIM + block_id.x;
     let cluster_id = workgroup_id * BLOCK_SIZE + local_id.x;
 
-    if cluster_id >= visible_instance_cluster_count { return; }
+    if cluster_id >= first_pass_cluster_count { return; }
 
     let info = cluster_info[cluster_id];
     let instance_id = info.instance_id;
@@ -238,7 +241,11 @@ fn cull_clusters(
 
     if is_outside_frustum(instance_id, meshlet) { return; }
 
-    if is_occluded(instance_id, meshlet) { return; }
+    if is_occluded(instance_id, meshlet) {
+        let pass_2_id = atomicAdd(&second_pass_cluster_count, 1u);
+        second_pass_cluster_candidates[pass_2_id] = info;
+        return;
+    }
 
     let id = atomicAdd(&indirect_args.instance_count, 1u);
     visible_cluster_info[id] = info;

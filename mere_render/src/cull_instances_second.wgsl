@@ -41,8 +41,8 @@ struct DispatchIndirectArgs {
 
 @group(0) @binding(4) var depth_pyramid: texture_2d<f32>;
 
-@group(0) @binding(5) var<storage, read_write> cluster_info: array<ClusterInfo>;
-@group(0) @binding(6) var<storage, read_write> visible_instance_cluster_count: atomic<u32>;
+@group(0) @binding(5) var<storage, read_write> second_pass_cluster_candidates: array<ClusterInfo>;
+@group(0) @binding(6) var<storage, read_write> second_pass_cluster_count: atomic<u32>;
 @group(0) @binding(7) var<storage, read_write> cluster_indirect_args: DispatchIndirectArgs;
 
 @group(0) @binding(8) var<storage, read> second_pass_candidates: array<u32>;
@@ -208,7 +208,7 @@ fn cull_instances(
         visible = !is_occluded(instance_id, aabb);
 
         if visible {
-            shared_cluster_base = atomicAdd(&visible_instance_cluster_count, meshlet_count);
+            shared_cluster_base = atomicAdd(&second_pass_cluster_count, meshlet_count);
 
             let required_workgroups = (shared_cluster_base + meshlet_count + CLUSTER_BLOCK_SIZE - 1) / CLUSTER_BLOCK_SIZE;
             if required_workgroups <= MAX_WORKGROUP_DIM {
@@ -232,7 +232,7 @@ fn cull_instances(
             let cluster_id = cluster_base + i;
             let meshlet_id = meshlet_base + i;
 
-            cluster_info[cluster_id] = ClusterInfo(instance_id, meshlet_id);
+            second_pass_cluster_candidates[cluster_id] = ClusterInfo(instance_id, meshlet_id);
         }
     }
 }
