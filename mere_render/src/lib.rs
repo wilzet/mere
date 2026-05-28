@@ -95,7 +95,12 @@ impl State {
         world.load_gltf("sponza/main_sponza", device, queue)?;
         world.load_gltf("sponza/pkg_a_curtains", device, queue)?;
         let teapot_handle = world.load_gltf("utah_teapot", device, queue)?[0];
-        let teapot = world.get_instance(teapot_handle).unwrap().clone();
+        let teapot = {
+            let teapot = world.get_instance_mut(teapot_handle).unwrap();
+            teapot.transform.translation.y += 1.0;
+            teapot.previous_transform.translation.y += 1.0;
+            teapot.clone()
+        };
 
         let mut rng = rand::rng();
 
@@ -160,10 +165,16 @@ impl State {
     }
 
     pub fn handle_input(&mut self, event_loop: &ActiveEventLoop, event: &WindowEvent) {
-        let ui_input = if !self.lock_cursor {
-            self.egui_renderer.handle_input(&self.window, &event)
-        } else {
+        let ui_input = if self.lock_cursor
+            && matches!(
+                event,
+                WindowEvent::MouseInput { .. }
+                    | WindowEvent::CursorMoved { .. }
+                    | WindowEvent::MouseWheel { .. }
+            ) {
             false
+        } else {
+            self.egui_renderer.handle_input(&self.window, &event)
         };
 
         match *event {

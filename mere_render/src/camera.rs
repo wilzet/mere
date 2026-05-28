@@ -54,11 +54,11 @@ impl CameraController {
                 self.is_right_pressed = is_pressed;
                 true
             }
-            KeyCode::KeyQ | KeyCode::Space => {
+            KeyCode::KeyE | KeyCode::PageUp => {
                 self.is_up_pressed = is_pressed;
                 true
             }
-            KeyCode::KeyE | KeyCode::ShiftLeft => {
+            KeyCode::KeyQ | KeyCode::PageDown => {
                 self.is_down_pressed = is_pressed;
                 true
             }
@@ -91,7 +91,8 @@ impl CameraController {
         #[rustfmt::skip]
         let right = (self.is_right_pressed as i32 - self.is_left_pressed as i32) as f32 * right_norm;
         let up = (self.is_up_pressed as i32 - self.is_down_pressed as i32) as f32 * Vec3::Y;
-        camera.transform.translation += (forward + right + up) * self.speed * delta_time;
+        camera.transform.translation +=
+            (forward + right + up).normalize_or_zero() * self.speed * delta_time;
 
         // Zoom
         const ZOOM_WEIGHT: f32 = 0.1;

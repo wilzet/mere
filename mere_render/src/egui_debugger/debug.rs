@@ -252,7 +252,7 @@ fn draw_overlay_controls(
 
                     ui.checkbox(lock_view, "Lock Render View");
 
-                    if ui.input(|i| i.key_pressed(egui::Key::L)) {
+                    if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                         *lock_view = !*lock_view;
                     }
 
@@ -388,11 +388,6 @@ fn draw_overlay_controls(
                             );
                             ui.end_row();
 
-                            ui.horizontal_top(|ui| {
-                                ui.separator();
-                            });
-                            ui.end_row();
-
                             // Totals Row
                             ui.label("Total:");
                             ui.label(
@@ -400,12 +395,12 @@ fn draw_overlay_controls(
                                     .monospace()
                                     .color(egui::Color32::LIGHT_GRAY),
                             );
-                            ui.label("");
                             ui.label(
                                 egui::RichText::new(format_metric(total_triangles))
                                     .monospace()
                                     .color(egui::Color32::LIGHT_GRAY),
                             );
+                            ui.label("");
                             ui.end_row();
                         });
                 });
