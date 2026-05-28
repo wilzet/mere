@@ -17,7 +17,12 @@ pub struct DepthPyramid {
 }
 
 impl DepthPyramid {
-    pub fn new(device: &wgpu::Device, label: &str, source: &wgpu::TextureView, dummy_target: &wgpu::TextureView) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        label: &str,
+        source: &wgpu::TextureView,
+        dummy_target: &wgpu::TextureView,
+    ) -> Self {
         let width = source.texture().width();
         let height = source.texture().height();
         let size = wgpu::Extent3d {

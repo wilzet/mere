@@ -76,7 +76,9 @@ impl World {
                     scale: scale.into(),
                 };
 
-                let is_opaque_material = model.primitives().all(|p| p.material().alpha_mode() == gltf::material::AlphaMode::Opaque);
+                let is_opaque_material = model
+                    .primitives()
+                    .all(|p| p.material().alpha_mode() == gltf::material::AlphaMode::Opaque);
                 if !is_opaque_material {
                     return None;
                 }

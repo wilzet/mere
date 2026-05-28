@@ -351,9 +351,9 @@ fn draw_overlay_controls(
                             );
                             ui.label(
                                 egui::RichText::new(format_metric(visible_triangles_est))
-                                .monospace()
-                                .strong()
-                                .color(egui::Color32::LIGHT_GREEN),
+                                    .monospace()
+                                    .strong()
+                                    .color(egui::Color32::LIGHT_GREEN),
                             );
                             ui.label(
                                 egui::RichText::new(format!("{:.1}%", visible_pct))
@@ -377,9 +377,9 @@ fn draw_overlay_controls(
                             );
                             ui.label(
                                 egui::RichText::new(format_metric(culled_triangles_est))
-                                .monospace()
-                                .strong()
-                                .color(culled_color),
+                                    .monospace()
+                                    .strong()
+                                    .color(culled_color),
                             );
                             ui.label(
                                 egui::RichText::new(format!("{:.1}%", culled_pct))
