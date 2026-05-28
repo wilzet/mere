@@ -112,6 +112,7 @@ pub fn debugger(
 
     draw_overlay_controls(
         debug,
+        profiler,
         ctx,
         device,
         queue,
@@ -216,6 +217,7 @@ fn apply_style(ctx: &egui::Context) {
 
 fn draw_overlay_controls(
     debug: &mut Debug,
+    profiler: &Profiler,
     ctx: &egui::Context,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -224,29 +226,6 @@ fn draw_overlay_controls(
     frame_time_ms: f32,
     lock_view: &mut bool,
 ) {
-    let buffer_slice = world.resources().debug_cluster_staging_buffer.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-
-    buffer_slice.map_async(wgpu::MapMode::Read, move |res| {
-        let _ = tx.send(res);
-    });
-
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-
-    let visible_clusters = if let Ok(Ok(_)) = rx.try_recv() {
-        let data = buffer_slice.get_mapped_range();
-        let counts = bytemuck::cast_slice(&data);
-
-        let visible_clusters = counts.get(0).copied().unwrap_or(0u32);
-
-        drop(data);
-        world.resources().debug_cluster_staging_buffer.unmap();
-
-        visible_clusters
-    } else {
-        0
-    };
-
     egui::Area::new(egui::Id::new("overlay_controls"))
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
         .show(ctx, |ui| {
@@ -321,7 +300,8 @@ fn draw_overlay_controls(
                     ui.label(section_header("Culling Stats"));
 
                     let total_clusters = world.instances().count_clusters();
-                    let culled_clusters = total_clusters.saturating_sub(visible_clusters as usize);
+                    let visible_clusters = profiler.visible_clusters(device) as usize;
+                    let culled_clusters = total_clusters.saturating_sub(visible_clusters);
 
                     let (visible_pct, culled_pct) = if total_clusters > 0 {
                         let total_f = total_clusters as f32;
@@ -333,43 +313,98 @@ fn draw_overlay_controls(
                         (0.0, 0.0)
                     };
 
+                    // Estimate triangles based on cluster culling percentages
+                    let total_triangles = world.instances().count_triangles();
+                    let visible_triangles_est =
+                        ((total_triangles as f64) * (visible_pct as f64 / 100.0)) as usize;
+                    let culled_triangles_est =
+                        total_triangles.saturating_sub(visible_triangles_est);
+
+                    fn format_metric(val: usize) -> String {
+                        if val >= 1_000_000 {
+                            format!("{:.2}M", val as f64 / 1_000_000.0)
+                        } else if val >= 1_000 {
+                            format!("{:.1}K", val as f64 / 1_000.0)
+                        } else {
+                            val.to_string()
+                        }
+                    }
+
                     egui::Grid::new("culling_stats_grid")
-                        .num_columns(2)
-                        .spacing([12.0, 6.0])
+                        .num_columns(4)
+                        .spacing([16.0, 6.0])
                         .show(ui, |ui| {
+                            // Headers
+                            ui.label("");
+                            ui.label(egui::RichText::new("Clusters").weak());
+                            ui.label(egui::RichText::new("Est. Tris").weak());
+                            ui.label(egui::RichText::new("Ratio").weak());
+                            ui.end_row();
+
+                            // Visible Row
                             ui.label("Visible:");
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} ({:.1}%)",
-                                    visible_clusters, visible_pct
-                                ))
-                                .color(egui::Color32::LIGHT_GREEN)
+                                egui::RichText::new(format_metric(visible_clusters))
+                                    .monospace()
+                                    .strong()
+                                    .color(egui::Color32::LIGHT_GREEN),
+                            );
+                            ui.label(
+                                egui::RichText::new(format_metric(visible_triangles_est))
                                 .monospace()
-                                .strong(),
+                                .strong()
+                                .color(egui::Color32::LIGHT_GREEN),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("{:.1}%", visible_pct))
+                                    .monospace()
+                                    .color(egui::Color32::LIGHT_GREEN),
                             );
                             ui.end_row();
 
+                            // Culled Row
                             ui.label("Culled:");
+                            let culled_color = if culled_clusters > 0 {
+                                ACCENT
+                            } else {
+                                egui::Color32::GRAY
+                            };
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} ({:.1}%)",
-                                    culled_clusters, culled_pct
-                                ))
-                                .color(if culled_clusters > 0 {
-                                    ACCENT
-                                } else {
-                                    egui::Color32::GRAY
-                                })
+                                egui::RichText::new(format_metric(culled_clusters))
+                                    .monospace()
+                                    .strong()
+                                    .color(culled_color),
+                            );
+                            ui.label(
+                                egui::RichText::new(format_metric(culled_triangles_est))
                                 .monospace()
-                                .strong(),
+                                .strong()
+                                .color(culled_color),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("{:.1}%", culled_pct))
+                                    .monospace()
+                                    .color(culled_color),
                             );
                             ui.end_row();
 
-                            ui.label("Total Clusters:");
+                            ui.horizontal_top(|ui| {
+                                ui.separator();
+                            });
+                            ui.end_row();
+
+                            // Totals Row
+                            ui.label("Total:");
                             ui.label(
-                                egui::RichText::new(format!("{}", total_clusters))
-                                    .color(egui::Color32::LIGHT_GRAY)
-                                    .monospace(),
+                                egui::RichText::new(format_metric(total_clusters))
+                                    .monospace()
+                                    .color(egui::Color32::LIGHT_GRAY),
+                            );
+                            ui.label("");
+                            ui.label(
+                                egui::RichText::new(format_metric(total_triangles))
+                                    .monospace()
+                                    .color(egui::Color32::LIGHT_GRAY),
                             );
                             ui.end_row();
                         });
@@ -531,6 +566,11 @@ fn draw_scene_section(ui: &mut egui::Ui, debug_memory: &mut DebugMemory, world: 
             metric_chip(
                 ui,
                 format!("Clusters {}", world.instances().count_clusters()),
+            );
+
+            metric_chip(
+                ui,
+                format!("Triangles {}", world.instances().count_triangles()),
             );
 
             metric_chip(

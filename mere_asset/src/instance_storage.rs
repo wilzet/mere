@@ -1,4 +1,5 @@
 use crate::{
+    asset_server::{AssetServer, Resource},
     gpu_buffer::{GpuBufferable, GpuStorageBuffer},
     handle::ResourceHandle,
     material::Material,
@@ -21,6 +22,8 @@ pub struct InstanceStorage {
     pub instance_material_ids: GpuStorageBuffer<Vec<u32>>,
     pub materials_in_scene: HashSet<ResourceHandle<Material>>,
     dirty: bool,
+    cached_cluster_count: usize,
+    cached_triangle_count: usize,
 }
 
 impl InstanceStorage {
@@ -44,6 +47,8 @@ impl InstanceStorage {
             ),
             materials_in_scene: HashSet::new(),
             dirty: true,
+            cached_cluster_count: 0,
+            cached_triangle_count: 0,
         }
     }
 
@@ -72,17 +77,22 @@ impl InstanceStorage {
     }
 
     pub fn count_clusters(&self) -> usize {
-        self.instances
-            .iter()
-            .fold(0, |acc, (_, i)| i.meshlet_count + acc) as usize
+        self.cached_cluster_count
     }
 
-    pub fn build_instance_buffers(&mut self) {
+    pub fn count_triangles(&self) -> usize {
+        self.cached_triangle_count
+    }
+
+    pub fn build_instance_buffers(&mut self, asset_server: &AssetServer) {
         if !self.dirty {
             return;
         }
 
         self.reset();
+
+        let mut total_clusters = 0;
+        let mut total_triangles = 0;
 
         for (_, instance) in self.instances.iter() {
             let mesh_uniform = MeshUniform::new(instance.transform, instance.previous_transform);
@@ -98,7 +108,21 @@ impl InstanceStorage {
             self.instance_material_ids
                 .get_mut()
                 .push(instance.material_id);
+
+            total_clusters += instance.meshlet_count as usize;
+            if let Some(mesh_lock) = asset_server.get(instance.meshlet_mesh) {
+                let mesh = mesh_lock.read();
+                let mesh_tris: usize = mesh
+                    .meshlets
+                    .iter()
+                    .map(|m| m.index_count as usize / 3)
+                    .sum();
+                total_triangles += mesh_tris;
+            }
         }
+
+        self.cached_cluster_count = total_clusters;
+        self.cached_triangle_count = total_triangles;
 
         self.scene_instance_count = self.instances.len() as u32;
     }

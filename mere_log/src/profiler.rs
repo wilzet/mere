@@ -53,6 +53,7 @@ pub struct Profiler {
     timestamp_queries: wgpu::QuerySet,
     frames: [FrameData; 2],
     frame_index: usize,
+    debug_cluster_staging_buffer: wgpu::Buffer,
 }
 
 pub struct EndId(u32);
@@ -90,6 +91,12 @@ impl Profiler {
             }),
             frames: [create_frame(0), create_frame(1)],
             frame_index: 0,
+            debug_cluster_staging_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("debug_cluster_staging_buffer"),
+                size: size_of::<u32>() as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }),
         }
     }
 
@@ -157,7 +164,11 @@ impl Profiler {
         }
     }
 
-    pub fn resolve(&mut self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn resolve(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        raster_count: Option<&wgpu::Buffer>,
+    ) {
         if !self.enabled {
             return;
         }
@@ -176,6 +187,16 @@ impl Profiler {
                 &frame.readback_buffer,
                 0,
                 (frame.query_count as u64) * 8,
+            );
+        }
+
+        if let Some(raster_count) = raster_count {
+            encoder.copy_buffer_to_buffer(
+                raster_count,
+                0,
+                &self.debug_cluster_staging_buffer,
+                0,
+                size_of::<u32>() as u64,
             );
         }
     }
@@ -300,6 +321,31 @@ impl Profiler {
                 frame.spans.clear();
                 frame.submission_index = None;
             }
+        }
+    }
+
+    pub fn visible_clusters(&self, device: &wgpu::Device) -> u32 {
+        let buffer_slice = self.debug_cluster_staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        buffer_slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+        if let Ok(Ok(_)) = rx.try_recv() {
+            let data = buffer_slice.get_mapped_range();
+            let counts = bytemuck::cast_slice(&data);
+
+            let visible_clusters = counts.get(0).copied().unwrap_or(0u32);
+
+            drop(data);
+            self.debug_cluster_staging_buffer.unmap();
+
+            visible_clusters
+        } else {
+            0
         }
     }
 }

@@ -295,17 +295,14 @@ impl State {
         {
             self.egui_renderer.begin_frame(&self.window);
 
-            self.profiler.resolve(&mut encoder);
-
-            if let Some(per_frame) = &self.world.resources().meshlet_per_frame_resources {
-                encoder.copy_buffer_to_buffer(
-                    &per_frame.raster_count,
-                    0,
-                    &self.world.resources().debug_cluster_staging_buffer,
-                    0,
-                    size_of::<u32>() as u64,
-                );
-            }
+            self.profiler.resolve(
+                &mut encoder,
+                self.world
+                    .resources()
+                    .meshlet_per_frame_resources
+                    .as_ref()
+                    .map(|per_frame| &per_frame.raster_count),
+            );
 
             self.egui_renderer.debug_window(
                 &mut self.profiler,

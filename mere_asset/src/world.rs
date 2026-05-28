@@ -264,7 +264,7 @@ impl World {
     ) {
         profiler.begin_cpu("build_instance_buffers");
 
-        self.instances.build_instance_buffers();
+        self.instances.build_instance_buffers(&self.asset_server);
 
         profiler.end();
 

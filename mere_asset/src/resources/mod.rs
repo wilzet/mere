@@ -44,7 +44,6 @@ pub struct ResourceStorage {
     pub resolve_material_depth_bind_group_layout: wgpu::BindGroupLayout,
 
     pub debug_bind_group_layout: wgpu::BindGroupLayout,
-    pub debug_cluster_staging_buffer: wgpu::Buffer,
 }
 
 impl ResourceStorage {
@@ -367,12 +366,6 @@ impl ResourceStorage {
                     }],
                 },
             ),
-            debug_cluster_staging_buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("debug_cluster_staging_buffer"),
-                size: size_of::<u32>() as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }),
         }
     }
 
