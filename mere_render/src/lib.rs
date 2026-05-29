@@ -41,32 +41,60 @@ impl DebugMode {
     }
 }
 
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
+#[repr(C)]
+pub struct Light {
+    pub color: [f32; 4],
+    pub direction: [f32; 4],
+}
+
 pub struct Debug {
     pub mode: DebugMode,
-    pub debug_buffer: wgpu::Buffer,
+    pub light: Light,
+    pub light_buffer: wgpu::Buffer,
+    pub debug_mode_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
 }
 
 impl Debug {
     fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
-        let debug_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("debug_buffer"),
+        let debug_mode_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("debug_mode_buffer"),
             contents: bytemuck::cast_slice(&[0u32]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let light = Light {
+            color: [1.0, 1.0, 0.8, 1.0],
+            direction: Vec3::new(-1.0, -1.0, 1.0).normalize().to_homogeneous().into(),
+        };
+
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("light_buffer"),
+            contents: bytemuck::cast_slice(&[light]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         let debug_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("debug_bind_group"),
             layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: debug_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: debug_mode_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: light_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         Self {
             mode: DebugMode::default(),
-            debug_buffer,
+            light,
+            light_buffer,
+            debug_mode_buffer,
             bind_group: debug_bind_group,
         }
     }

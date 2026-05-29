@@ -2,6 +2,7 @@ use crate::{Debug, DebugMode, camera::CameraController};
 use egui_plot::{Line, Plot, PlotPoints};
 use mere_asset::World;
 use mere_log::{Profiler, ResolvedSpan};
+use mere_math::Vec3;
 use std::{
     collections::{HashSet, VecDeque},
     time::Duration,
@@ -132,6 +133,7 @@ pub fn debugger(
     .default_height(400.0)
     .min_width(350.0)
     .resizable(true)
+    .default_open(false)
     .frame(
         egui::Frame::window(&ctx.global_style())
             .fill(BG)
@@ -167,7 +169,7 @@ pub fn debugger(
 
                 draw_memory_section(ui, world);
 
-                draw_scene_section(ui, debug_memory, world);
+                draw_scene_section(ui, debug_memory, debug, queue, world);
 
                 draw_depth_pyramid_section(ui, world, device, renderer);
 
@@ -290,7 +292,7 @@ fn draw_overlay_controls(
                         let mode_u32 = debug.mode as u32;
 
                         queue.write_buffer(
-                            &debug.debug_buffer,
+                            &debug.debug_mode_buffer,
                             0,
                             bytemuck::cast_slice(&[mode_u32]),
                         );
@@ -550,7 +552,13 @@ fn draw_memory_section(ui: &mut egui::Ui, world: &World) {
     });
 }
 
-fn draw_scene_section(ui: &mut egui::Ui, debug_memory: &mut DebugMemory, world: &World) {
+fn draw_scene_section(
+    ui: &mut egui::Ui,
+    debug_memory: &mut DebugMemory,
+    debug: &mut Debug,
+    queue: &wgpu::Queue,
+    world: &World,
+) {
     section(ui, "Scene Explorer", |ui| {
         ui.horizontal_wrapped(|ui| {
             metric_chip(
@@ -572,6 +580,83 @@ fn draw_scene_section(ui: &mut egui::Ui, debug_memory: &mut DebugMemory, world: 
                 ui,
                 format!("Pending Assets {}", world.assets().pending_dependencies()),
             );
+        });
+
+        card_frame().show(ui, |ui| {
+            ui.strong("Directional Light");
+            ui.add_space(4.0);
+
+            let mut changed = false;
+
+            ui.horizontal(|ui| {
+                ui.label("Color:");
+                if ui
+                    .color_edit_button_rgba_unmultiplied(&mut debug.light.color)
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.add_space(2.0);
+            ui.separator();
+            ui.add_space(2.0);
+
+            let mut dir_x = debug.light.direction[0];
+            let mut dir_y = debug.light.direction[1];
+            let mut dir_z = debug.light.direction[2];
+
+            ui.horizontal(|ui| {
+                ui.label("X:");
+                if ui
+                    .add(egui::Slider::new(&mut dir_x, -1.0..=1.0).smart_aim(false))
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Y:");
+                if ui
+                    .add(egui::Slider::new(&mut dir_y, -1.0..=1.0).smart_aim(false))
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Z:");
+                if ui
+                    .add(egui::Slider::new(&mut dir_z, -1.0..=1.0).smart_aim(false))
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                let raw_dir = Vec3::new(dir_x, dir_y, dir_z);
+                let len = raw_dir.length();
+
+                if ui.button("Normalize Vector").clicked() && len > 0.0 {
+                    let normalized = raw_dir.normalize();
+                    dir_x = normalized.x;
+                    dir_y = normalized.y;
+                    dir_z = normalized.z;
+                    changed = true;
+                }
+
+                ui.weak(format!("Magnitude: {:.2}", len));
+            });
+
+            if changed {
+                debug.light.direction = Vec3::new(dir_x, dir_y, dir_z).to_homogeneous().into();
+                queue.write_buffer(&debug.light_buffer, 0, bytemuck::bytes_of(&debug.light));
+            }
         });
 
         card_frame().show(ui, |ui| {

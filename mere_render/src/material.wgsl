@@ -334,7 +334,14 @@ struct Debug {
     mode: u32,
 }
 
+struct DirectionalLight {
+    color: vec4<f32>,
+    direction: vec4<f32>,
+}
+
+
 @group(3) @binding(0) var<uniform> debug: Debug;
+@group(3) @binding(1) var<uniform> dir_light: DirectionalLight;
 
 @fragment
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
@@ -370,13 +377,12 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
             let world_bitangent = normalize(cross(world_normal, world_tangent.xyz) * world_tangent.w);
             let tbn_matrix = transpose(mat3x3(world_tangent.xyz, world_bitangent, world_normal));
 
-            const light_pos: vec3<f32> = vec3(0.0, 15.0, 0.0);
-            const light_color: vec3<f32> = vec3(1.0, 1.0, 1.0);
+            let light_color = dir_light.color.rgb * dir_light.color.a;
+            let light_dir_world = -normalize(dir_light.direction.xyz);
 
             let world_position = vertex_output.world_position;
 
             let view_dir_world = main_camera.world_position.xyz - world_position.xyz;
-            let light_dir_world = light_pos - world_position.xyz;
             let tangent_view_dir = tbn_matrix * view_dir_world;
             let tangent_light_dir = tbn_matrix * light_dir_world;
 
