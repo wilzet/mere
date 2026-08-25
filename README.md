@@ -2,7 +2,7 @@
 
 **MeRe** is a rendering engine built with **Rust** and **wgpu**.
 
-[//]: # (It leverages modern GPU features to implement virtual geometry, enabling efficient culling and level-of-detail management for highly detailed scenes.)
+[//]: # (It leverages modern GPU features to implement virtual geometry, enabling efficient culling \(and level-of-detail management \(not yet\)\) for highly detailed scenes.)
 
 ## Description
 Traditional vertex processing can become a bottleneck when dealing with high-poly geometry. **MeRe** addresses this by partitioning meshes into *meshlets* (small clusters of geometry), allowing for early rejection of geometry at the cluster level via frustum and occlusion culling. By utilizing compute shaders, all of the culling is allowed to be processed on the GPU.
@@ -16,8 +16,8 @@ Traditional vertex processing can become a bottleneck when dealing with high-pol
 ### Build and run the Project
 Clone the repository:
 ```bash
-git clone https://git.chalmers.se/wilmerz1/tda205-project.git
-cd tda205-project
+git clone https://github.com/wilzet/mere.git
+cd mere
 ```
 
 Then build and run the project with the default scene:
