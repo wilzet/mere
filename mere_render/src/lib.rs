@@ -24,19 +24,30 @@ pub enum DebugMode {
     #[default]
     CLUSTERS,
     SHADED,
-    TRIANGLES,
-    INSTANCES,
     MATERIALS,
+    INSTANCES,
+    TRIANGLES,
+    SPLIT,
 }
 
 impl DebugMode {
+    pub const ALL: [Self; 6] = [
+        Self::CLUSTERS,
+        Self::SHADED,
+        Self::MATERIALS,
+        Self::INSTANCES,
+        Self::TRIANGLES,
+        Self::SPLIT,
+    ];
+
     pub fn name(&self) -> &str {
         match self {
-            Self::SHADED => "Shaded",
             Self::CLUSTERS => "Clusters",
-            Self::TRIANGLES => "Triangles",
-            Self::INSTANCES => "Instances",
+            Self::SHADED => "Shaded",
             Self::MATERIALS => "Materials",
+            Self::INSTANCES => "Instances",
+            Self::TRIANGLES => "Triangles",
+            Self::SPLIT => "Split View",
         }
     }
 }
@@ -66,7 +77,10 @@ impl Debug {
 
         let light = Light {
             color: [1.0, 1.0, 0.8, 1.0],
-            direction: Vec3::new(-1.0, -1.0, 1.0).normalize().to_homogeneous().into(),
+            direction: Vec3::new(-1.0, -1.0, 1.0)
+                .normalize()
+                .to_homogeneous()
+                .into(),
         };
 
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

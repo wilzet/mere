@@ -137,7 +137,7 @@ pub fn debugger(
     .frame(
         egui::Frame::window(&ctx.global_style())
             .fill(BG)
-            .stroke(egui::Stroke::new(1.0, BORDER))
+            .stroke(egui::Stroke::new(1.0_f32, BORDER))
             .corner_radius(12.0)
             .inner_margin(12.0),
     )
@@ -192,7 +192,7 @@ fn apply_style(ctx: &egui::Context) {
         style.visuals.widgets.open.bg_fill = CARD_FILL_HOVER;
         style.visuals.widgets.inactive.fg_stroke.color = egui::Color32::WHITE;
         style.visuals.widgets.hovered.fg_stroke.color = egui::Color32::WHITE;
-        style.visuals.window_stroke = egui::Stroke::new(1.0, BORDER);
+        style.visuals.window_stroke = egui::Stroke::new(1.0_f32, BORDER);
         style.visuals.selection.bg_fill = ACCENT.linear_multiply(0.4);
         style.visuals.collapsing_header_frame = false;
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
@@ -281,11 +281,9 @@ fn draw_overlay_controls(
                     egui::ComboBox::from_label("View Mode")
                         .selected_text(debug.mode.name())
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut debug.mode, DebugMode::CLUSTERS, "Clusters");
-                            ui.selectable_value(&mut debug.mode, DebugMode::SHADED, "Shaded");
-                            ui.selectable_value(&mut debug.mode, DebugMode::MATERIALS, "Materials");
-                            ui.selectable_value(&mut debug.mode, DebugMode::INSTANCES, "Instances");
-                            ui.selectable_value(&mut debug.mode, DebugMode::TRIANGLES, "Triangles");
+                            for &mode in &DebugMode::ALL {
+                                ui.selectable_value(&mut debug.mode, mode, mode.name());
+                            }
                         });
 
                     if debug.mode != current_mode {
@@ -710,7 +708,7 @@ fn draw_scene_section(
 
                                 egui::Frame::new()
                                     .fill(PANEL)
-                                    .stroke(egui::Stroke::new(1.0, BORDER))
+                                    .stroke(egui::Stroke::new(1.0_f32, BORDER))
                                     .corner_radius(8.0)
                                     .inner_margin(10.0)
                                     .show(ui, |ui| {
@@ -855,7 +853,7 @@ fn draw_timing_history(
                                 egui::pos2(line_x, rect.top() + 4.0),
                                 egui::pos2(line_x, rect.bottom() - 4.0),
                             ],
-                            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(10)),
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(10)),
                         );
                     }
 
@@ -923,7 +921,7 @@ fn draw_timing_history(
                 painter.rect_stroke(
                     rect,
                     egui::CornerRadius::same(0),
-                    egui::Stroke::new(1.0, BORDER),
+                    egui::Stroke::new(1.0_f32, BORDER),
                     egui::StrokeKind::Outside,
                 );
             });
@@ -939,7 +937,7 @@ fn draw_timing_history(
 
                     egui::Frame::new()
                         .fill(PANEL)
-                        .stroke(egui::Stroke::new(1.0, BORDER))
+                        .stroke(egui::Stroke::new(1.0_f32, BORDER))
                         .corner_radius(6.0)
                         .inner_margin(egui::Margin::symmetric(6, 2))
                         .outer_margin(0.0)
@@ -1000,7 +998,7 @@ fn create_plot(
                     reset_requested = false;
                 }
 
-                plot_ui.line(Line::new(label, points).color(color).width(2.0));
+                plot_ui.line(Line::new(label, points).color(color).width(2.0_f32));
             })
             .response
             .rect;
@@ -1105,7 +1103,7 @@ fn metric_chip(ui: &mut egui::Ui, text: impl Into<String>) {
         rect,
         egui::CornerRadius::same(u8::MAX),
         PANEL,
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0_f32, BORDER),
         egui::StrokeKind::Outside,
     );
 
@@ -1116,7 +1114,7 @@ fn metric_chip(ui: &mut egui::Ui, text: impl Into<String>) {
 fn card_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(CARD_FILL)
-        .stroke(egui::Stroke::new(1.0, BORDER))
+        .stroke(egui::Stroke::new(1.0_f32, BORDER))
         .corner_radius(10.0)
         .inner_margin(10.0)
 }

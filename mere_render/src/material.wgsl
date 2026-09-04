@@ -162,7 +162,7 @@ fn get_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
 
     let triangle_id = extractBits(packed_ids, 0, 7);
     let index_ids = meshlet.index_offset + triangle_id * 3 + vec3(0, 1, 2);
-    
+
     let local_v0 = get_meshlet_local_index(index_ids[0]);
     let local_v1 = get_meshlet_local_index(index_ids[1]);
     let local_v2 = get_meshlet_local_index(index_ids[2]);
@@ -339,15 +339,29 @@ struct DirectionalLight {
     direction: vec4<f32>,
 }
 
-
 @group(3) @binding(0) var<uniform> debug: Debug;
 @group(3) @binding(1) var<uniform> dir_light: DirectionalLight;
 
 @fragment
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let vertex_output = get_vertex_output(frag_coord);
+    var debug_mode = debug.mode;
 
-    switch debug.mode {
+    if debug_mode == 5 { // SPLIT VIEW
+        let uv_screen = frag_coord.xy / main_camera.viewport.zw;
+
+        let split_val = uv_screen.x + uv_screen.y * 0.2;
+
+        if split_val < 0.4 {
+            debug_mode = 1; // Shaded
+        } else if split_val < 0.8 {
+            debug_mode = 0; // Clusters
+        } else {
+            debug_mode = 2; // Triangles
+        }
+    }
+
+    switch debug_mode {
         case 0: { // CLUSTERS
             let cluster_id = vertex_output.cluster_id;
             let color = hash_color(cluster_id + 1);
