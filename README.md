@@ -1,3 +1,4 @@
+![Split view of shading, clusters, and triangles.](./content/split_view_screenshot.png)
 # MeRe: Meshlet Rendering Engine
 
 **MeRe** is a rendering engine built with **Rust** and **wgpu**.
